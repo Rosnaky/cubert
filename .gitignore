@@ -18,6 +18,7 @@ target
 
 # Secrets
 config.toml
+.env
 
 # Logs
 logs

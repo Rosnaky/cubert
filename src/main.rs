@@ -1,9 +1,9 @@
 use cubert::config::Config;
 use cubert::logging::Logger;
-use cubert::types::{Signal, Order, Side, OrderType, Position};
+use cubert::broker::alpaca::AlpacaApiBroker;
 
-fn main() {
-    // Load config
+#[tokio::main]
+async fn main() {
     let config = match Config::load("config.toml") {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -12,40 +12,46 @@ fn main() {
         }
     };
 
-    // Create logger from config
     let level = Logger::parse_level(&config.logging.level);
     let logger = Logger::new(level, Some(&config.logging.file))
         .expect("Failed to create logger");
 
-    logger.info("Quant bot starting up...");
-    logger.debug("This is a debug message");
-    logger.info(&format!("Trading symbols: {:?}", config.data.symbols));
-    logger.warn("This is a warning");
+    logger.info("=== Cubert Starting ===");
 
-    // Log a signal
-    let signal = Signal::Buy {
-        symbol: "AAPL".to_string(),
-        strength: 0.75,
-    };
-    logger.log_signal(&signal);
+    let broker = AlpacaApiBroker::new(
+        &config.broker.api_key,
+        &config.broker.api_secret,
+        config.broker.paper,
+    );
 
-    // Log an order
-    let order = Order {
-        symbol: "AAPL".to_string(),
-        side: Side::Buy,
-        quantity: 10.0,
-        order_type: OrderType::Market,
-    };
-    logger.log_order(&order);
+    // Test account fetch
+    match broker.fetch_account().await {
+        Ok(account) => {
+            logger.info(&format!("Account equity: ${:.2}", account.equity));
+            logger.info(&format!("Cash: ${:.2}", account.cash));
+            logger.info(&format!("Buying power: ${:.2}", account.buying_power));
+        }
+        Err(e) => {
+            logger.error(&format!("Failed to fetch account: {}", e));
+            std::process::exit(1);
+        }
+    }
 
-    // Log a position
-    let position = Position {
-        symbol: "AAPL".to_string(),
-        quantity: 100.0,
-        avg_entry_price: 150.0,
-        current_price: 157.50,
-    };
-    logger.log_position(&position);
+    // Test positions fetch
+    match broker.fetch_positions().await {
+        Ok(positions) => {
+            if positions.is_empty() {
+                logger.info("No open positions");
+            } else {
+                for pos in &positions {
+                    logger.log_position(pos);
+                }
+            }
+        }
+        Err(e) => {
+            logger.error(&format!("Failed to fetch positions: {}", e));
+        }
+    }
 
-    logger.info("Startup complete");
+    logger.info("=== Connection OK ===");
 }

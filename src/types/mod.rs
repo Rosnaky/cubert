@@ -3,7 +3,6 @@
 
 use std::time::SystemTime;
 
-
 #[derive(Debug, Clone)]
 pub struct Bar {
     pub symbol: String,

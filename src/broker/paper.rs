@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::format};
+use std::collections::HashMap;
 
 use crate::{broker::{Broker, BrokerError, OrderId}, types::{Account, Order, OrderType, Position, Side}};
 
@@ -64,7 +64,7 @@ impl Broker for PaperBroker {
 
         match order.side {
             Side::Buy => {
-                if (order_value > self.account.cash) {
+                if order_value > self.account.cash  {
                     return Err(BrokerError::InsufficientFunds);
                 }
 
@@ -105,7 +105,7 @@ impl Broker for PaperBroker {
         Ok(self.generate_order_id())
     }
     
-    fn cancel_order(&mut self, order_id: &OrderId) -> Result<(), BrokerError> {
+    fn cancel_order(&mut self, _order_id: &OrderId) -> Result<(), BrokerError> {
         Ok(())
     }
     

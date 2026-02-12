@@ -2,6 +2,7 @@ use crate::types::{Account, Order, Position};
 
 
 pub mod paper;
+pub mod alpaca;
 
 pub type OrderId = String;
 
