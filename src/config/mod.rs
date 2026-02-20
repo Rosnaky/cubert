@@ -10,12 +10,15 @@ pub struct Config {
     pub strategy: StrategyConfig,
     pub risk: RiskConfig,
     pub logging: LoggingConfig,
+    pub storage: StorageConfig,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BrokerConfig {
     pub name: String,
     pub paper: bool,
+    pub api_endpoint: String,
+    pub data_endpoint: String,
     #[serde(default)]
     pub api_key: String,
     #[serde(default)]
@@ -28,24 +31,34 @@ pub struct DataConfig {
     pub timeframe: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct StrategyConfig {
+#[derive(Debug, Deserialize, Clone)]
+pub struct StrategyConfig {  // Renamed from StrategyConfig
     pub name: String,
     pub lookback_period: usize,
     pub threshold: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RiskConfig {
     pub max_position_pct: f64,
     pub max_drawdown_pct: f64,
     pub max_daily_trades: u32,
+    #[serde(default = "default_max_total_exposure")]
+    pub max_total_exposure: f64,
+    #[serde(default = "default_max_loss_per_trade")]
+    pub max_loss_per_trade: f64,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct LoggingConfig {
     pub level: String,
     pub file: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StorageConfig {
+    #[serde(default)]
+    pub database_url: String,
 }
 
 #[derive(Debug)]
@@ -94,6 +107,17 @@ impl Config {
         config.broker.api_secret = std::env::var("ALPACA_API_SECRET")
             .map_err(|_| ConfigError::MissingEnvVar("ALPACA_API_SECRET".to_string()))?;
 
+        config.storage.database_url = std::env::var("DATABASE_URL")
+            .map_err(|_| ConfigError::MissingEnvVar("DATABASE_URL".to_string()))?;
+
         Ok(config)
     }
+}
+
+fn default_max_total_exposure() -> f64 {
+    0.8
+}
+
+fn default_max_loss_per_trade() -> f64 {
+    0.02
 }

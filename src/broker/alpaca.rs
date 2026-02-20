@@ -4,10 +4,6 @@ use serde::{Deserialize, Serialize};
 use crate::{broker::{BrokerError, OrderId}, types::{Account, Order, OrderType, Position, Side}};
 
 
-
-const PAPER_URL: &str = "https://paper-api.alpaca.markets";
-
-
 #[derive(Debug, Deserialize)]
 struct AlpacaApiAccount {
     equity: String,
@@ -95,10 +91,10 @@ pub struct AlpacaApiBroker {
 }
 
 impl AlpacaApiBroker {
-    pub fn new(api_key: &str, api_secret: &str, _paper: bool) -> Self {
+    pub fn new(api_endpoint: &str, api_key: &str, api_secret: &str, _paper: bool) -> Self {
         Self {
             client: Client::new(),
-            base_url: {PAPER_URL}.to_string(),
+            base_url: {api_endpoint}.to_string(),
             api_key: api_key.to_string(),
             api_secret: api_secret.to_string(),
         }

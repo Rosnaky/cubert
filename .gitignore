@@ -22,3 +22,6 @@ config.toml
 
 # Logs
 logs
+
+# Local files
+venv
