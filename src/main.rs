@@ -50,6 +50,29 @@ async fn main() {
         config.broker.paper,
     );
 
+    let strategies = vec![
+        StrategySettings {
+            name: "momentum_tech".to_string(),
+            symbols: vec!["AAPL".to_string(), "MSFT".to_string()],
+            params: StrategyParams::Momentum {
+                lookback_period: 20,
+                threshold: 0.02,
+                startup_lookback: "1Hour".to_string(),
+                startup_bar_limit: 50,
+            },
+        },
+        StrategySettings {
+            name: "momentum_ev".to_string(),
+            symbols: vec!["TSLA".to_string()],
+            params: StrategyParams::Momentum {
+                lookback_period: 10,
+                threshold: 0.03,
+                startup_lookback: "30Min".to_string(),
+                startup_bar_limit: 30,
+            },
+        },
+    ];
+
     let data = MarketData::new(
         &config.broker.data_endpoint,
         &config.broker.api_key,
@@ -61,27 +84,13 @@ async fn main() {
         broker,
         data,
         logger.clone(),
-        config.risk.clone(),  // Use this instead of risk_config
+        config.risk.clone(),
+        strategies.clone(),
     ).await;
 
-    // Register strategies
-    engine.add_strategy(StrategySettings {
-        name: "momentum_tech".to_string(),
-        symbols: vec!["AAPL".to_string(), "MSFT".to_string()],
-        params: StrategyParams::Momentum {
-            lookback_period: 20,
-            threshold: 0.02,
-        },
-    });
-
-    engine.add_strategy(StrategySettings {
-        name: "momentum_ev".to_string(),
-        symbols: vec!["TSLA".to_string()],
-        params: StrategyParams::Momentum {
-            lookback_period: 10,
-            threshold: 0.03,
-        },
-    });
+    for strategy in strategies {
+        engine.add_strategy(strategy);
+    }
 
     // Run engine (polls every 60 seconds)
     engine.run(60).await;

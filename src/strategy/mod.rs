@@ -16,6 +16,8 @@ pub enum StrategyParams {
     Momentum {
         lookback_period: usize,
         threshold: f64,
+        startup_lookback: String,
+        startup_bar_limit: u32,
     },
     MeanReversion {
         window: usize,
@@ -36,7 +38,7 @@ pub trait Strategy: Send + Sync {
 
 pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {
     match &config.params {
-        StrategyParams::Momentum { lookback_period, threshold } => {
+        StrategyParams::Momentum { lookback_period, threshold, .. } => {
             Box::new(momentum::MomentumStrategy::new(
                 &config.name,
                 config.symbols.clone(),

@@ -36,6 +36,8 @@ pub struct StrategyConfig {  // Renamed from StrategyConfig
     pub name: String,
     pub lookback_period: usize,
     pub threshold: f64,
+    pub startup_lookback: String,
+    pub startup_bar_limit: u32,
 }
 
 #[derive(Debug, Deserialize, Clone)]

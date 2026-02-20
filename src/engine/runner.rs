@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::{sync::mpsc, time::interval};
 
-use crate::{broker::alpaca::AlpacaApiBroker, config::{RiskConfig, StrategyConfig}, data::MarketData, logging::Logger, risk::RiskManager, storage::Storage, strategy::{Strategy, StrategySettings, create_strategy}, types::{Side, Signal}};
+use crate::{broker::alpaca::AlpacaApiBroker, config::{RiskConfig, StrategyConfig}, data::MarketData, logging::Logger, risk::RiskManager, storage::Storage, strategy::{Strategy, StrategyParams, StrategySettings, create_strategy}, types::{Side, Signal}};
 
 
 #[derive(Debug)]
@@ -26,6 +26,7 @@ pub struct Engine {
     risk_manager: RiskManager,
     signal_tx: mpsc::Sender<SignalMessage>,
     signal_rx: mpsc::Receiver<SignalMessage>,
+    strategy_configs: Vec<StrategySettings>,
 }
 
 impl Engine {
@@ -35,6 +36,7 @@ impl Engine {
         data: MarketData,
         logger: Arc<Logger>,
         risk_config: RiskConfig,
+        strategy_configs: Vec<StrategySettings>,
     ) -> Self {
         let (signal_tx, signal_rx) = mpsc::channel(100);
 
@@ -51,6 +53,7 @@ impl Engine {
             risk_manager: RiskManager::new(risk_config),
             signal_tx,
             signal_rx,
+            strategy_configs,
         }
     }
 
@@ -79,6 +82,9 @@ impl Engine {
         }
 
         self.state.logger.info(&format!("Tracking symbols: {:?}", all_symbols));
+
+        // Prefetch historical data
+        self.fetch_historical_data(&all_symbols);
 
         let mut ticker = interval(Duration::from_secs(poll_interval_secs));
 
@@ -225,10 +231,65 @@ impl Engine {
                         Some(strategy_name),
                     ).await;
                 }
-                Err(e) => {
+            Err(e) => {
                     self.state.logger.error(&format!("Order failed: {}", e));
                 }
             }
         }
+    }
+
+    async fn fetch_historical_data(&mut self, symbols: &Vec<String>) {
+        self.state.logger.info("Fetching historical data for all symbols...");
+        
+        for symbol in symbols {
+            // Find the strategy config for this symbol
+            let config = match self.strategy_configs.iter()
+                .find(|c| c.symbols.contains(symbol))
+            {
+                Some(c) => c,
+                None => {
+                    self.state.logger.error(&format!("No strategy config for {}", symbol));
+                    continue;
+                }
+            };
+
+            // Extract startup params from strategy params
+            let (timeframe, bar_limit) = match &config.params {
+                StrategyParams::Momentum { startup_lookback, startup_bar_limit, .. } => {
+                    (startup_lookback.as_str(), *startup_bar_limit)
+                }
+                StrategyParams::MeanReversion { .. } => {
+                    ("1Hour", 50) // Default fallback
+                }
+                StrategyParams::Custom { params } => {
+                    ("1Hour", 50) // Default fallback
+                }
+            };
+            
+            match self.state.data.get_bars(symbol, timeframe, bar_limit).await {
+                Ok(bars) => {
+                    self.state.logger.info(&format!(
+                        "{}: loaded {} bars ({})", 
+                        symbol, bars.len(), timeframe
+                    ));
+                    
+                    for bar in &bars {
+                        for strategy in &mut self.strategies {
+                            if strategy.symbols().contains(symbol) {
+                                let _ = strategy.on_bar(bar);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.state.logger.error(&format!(
+                        "Failed to load history for {}: {}", 
+                        symbol, e
+                    ));
+                }
+            }
+        }
+        
+        self.state.logger.info("Historical data warmup complete");
     }
 }
