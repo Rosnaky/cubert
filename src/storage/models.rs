@@ -41,3 +41,11 @@ pub struct DbSignal {
     pub strategy: String,
     pub timestamp: String,
 }
+
+#[derive(Debug, Clone, FromRow)]
+pub struct DbAccount {
+    pub id: String,
+    pub cash: f64,
+    pub created_at: String,
+    pub updated_at: String,
+}

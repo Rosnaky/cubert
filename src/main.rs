@@ -10,7 +10,6 @@ use cubert::strategy::{StrategyParams, StrategySettings};
 
 #[tokio::main]
 async fn main() {
-    // Load config
     let config = match Config::load("config.toml") {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -19,7 +18,6 @@ async fn main() {
         }
     };
 
-    // Create logger
     let level = Logger::parse_level(&config.logging.level);
     let logger = Arc::new(
         Logger::new(level, Some(&config.logging.file))
@@ -28,7 +26,6 @@ async fn main() {
 
     logger.info("=== Cubert Starting ===");
 
-    // Connect to database
     let storage = match Storage::connect(&config.storage.database_url).await {
         Ok(s) => s,
         Err(e) => {
@@ -42,12 +39,35 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // Create broker and data clients
+    // Initialize account with starting cash (only creates if doesn't exist)
+    let starting_cash = 100_000.0;
+    if let Err(e) = storage.init_account(starting_cash).await {
+        logger.error(&format!("Failed to init account: {}", e));
+        std::process::exit(1);
+    }
+
+    // Verify account
+    match storage.get_account().await {
+        Ok(account) => {
+            logger.info(&format!("Account: ${:.2} cash, ${:.2} equity", account.cash, account.equity));
+        }
+        Err(e) => {
+            logger.error(&format!("Account error: {}", e));
+            std::process::exit(1);
+        }
+    }
+
     let broker = AlpacaApiBroker::new(
         &config.broker.api_endpoint,
         &config.broker.api_key,
         &config.broker.api_secret,
         config.broker.paper,
+    );
+
+    let data = MarketData::new(
+        &config.broker.data_endpoint,
+        &config.broker.api_key,
+        &config.broker.api_secret,
     );
 
     let strategies = vec![
@@ -73,12 +93,6 @@ async fn main() {
         },
     ];
 
-    let data = MarketData::new(
-        &config.broker.data_endpoint,
-        &config.broker.api_key,
-        &config.broker.api_secret,
-    );
-
     let mut engine = Engine::new(
         storage,
         broker,
@@ -92,6 +106,5 @@ async fn main() {
         engine.add_strategy(strategy);
     }
 
-    // Run engine (polls every 60 seconds)
     engine.run(60).await;
 }

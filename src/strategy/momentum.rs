@@ -83,7 +83,7 @@ impl Strategy for MomentumStrategy {
             })
         }
         else {
-            Some(Signal::Hold)
+            None
         }
     }
 

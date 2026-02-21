@@ -84,7 +84,7 @@ impl Engine {
         self.state.logger.info(&format!("Tracking symbols: {:?}", all_symbols));
 
         // Prefetch historical data
-        self.fetch_historical_data(&all_symbols);
+        self.fetch_historical_data(&all_symbols).await;
 
         let mut ticker = interval(Duration::from_secs(poll_interval_secs));
 
@@ -113,11 +113,16 @@ impl Engine {
                 for symbol in strategy.symbols().to_vec() {
                     if let Some(bar) = bars.get(&symbol) {
                         if let Some(signal) = strategy.on_bar(bar) {
-                            signals.push((
-                                strategy.name().to_string(),
-                                signal,
-                                bar.close,
-                            ));
+                            match &signal {
+                                Signal::Buy { .. } | Signal::Sell { .. } => {
+                                    signals.push((
+                                        strategy.name().to_string(),
+                                        signal,
+                                        bar.close,
+                                    ));
+                                }
+                                Signal::Hold => {}
+                            }
                         }
                     }
                 }
@@ -131,7 +136,7 @@ impl Engine {
             }
 
             // Save account snapshot
-            match self.state.broker.fetch_account().await {
+            match self.state.storage.get_account().await {
                 Ok(account) => {
                     let _ = self.state.storage.insert_account_snapshot(
                         account.equity,
@@ -183,7 +188,7 @@ impl Engine {
         ).await;
 
         // Get account and positions for risk check
-        let account = match self.state.broker.fetch_account().await {
+        let account = match self.state.storage.get_account().await {
             Ok(a) => a,
             Err(e) => {
                 self.state.logger.error(&format!("Failed to fetch account: {}", e));
@@ -191,7 +196,7 @@ impl Engine {
             }
         };
 
-        let positions = match self.state.broker.fetch_positions().await {
+        let positions = match self.state.storage.get_positions().await {
             Ok(p) => p,
             Err(e) => {
                 self.state.logger.error(&format!("Failed to fetch positions: {}", e));
