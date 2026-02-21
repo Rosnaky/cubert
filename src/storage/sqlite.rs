@@ -1,11 +1,11 @@
 //! SQLite storage implementation.
 
 use chrono::Utc;
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool, Row};
+use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 use uuid::Uuid;
 
+use super::models::{DbAccount, DbAccountSnapshot, DbPosition, DbSignal, DbTrade};
 use crate::types::{Account, Position};
-use super::models::{DbTrade, DbPosition, DbAccountSnapshot, DbSignal, DbAccount};
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -43,7 +43,8 @@ impl Storage {
 
     pub async fn migrate(&self) -> Result<(), StorageError> {
         // Trades table
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS trades (
                 id TEXT PRIMARY KEY,
                 symbol TEXT NOT NULL,
@@ -54,13 +55,15 @@ impl Storage {
                 order_id TEXT,
                 strategy TEXT
             )
-        "#)
+        "#,
+        )
         .execute(&self.pool)
         .await
         .map_err(|e| StorageError::Query(e.to_string()))?;
 
         // Positions table
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS positions (
                 id TEXT PRIMARY KEY,
                 symbol TEXT NOT NULL UNIQUE,
@@ -69,13 +72,15 @@ impl Storage {
                 current_price REAL NOT NULL,
                 updated_at TEXT NOT NULL
             )
-        "#)
+        "#,
+        )
         .execute(&self.pool)
         .await
         .map_err(|e| StorageError::Query(e.to_string()))?;
 
         // Account snapshots table (historical)
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS account_snapshots (
                 id TEXT PRIMARY KEY,
                 equity REAL NOT NULL,
@@ -83,13 +88,15 @@ impl Storage {
                 buying_power REAL NOT NULL,
                 timestamp TEXT NOT NULL
             )
-        "#)
+        "#,
+        )
         .execute(&self.pool)
         .await
         .map_err(|e| StorageError::Query(e.to_string()))?;
 
         // Signals table
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS signals (
                 id TEXT PRIMARY KEY,
                 symbol TEXT NOT NULL,
@@ -98,20 +105,23 @@ impl Storage {
                 strategy TEXT NOT NULL,
                 timestamp TEXT NOT NULL
             )
-        "#)
+        "#,
+        )
         .execute(&self.pool)
         .await
         .map_err(|e| StorageError::Query(e.to_string()))?;
 
         // Account table (current state - single row)
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS account (
                 id TEXT PRIMARY KEY,
                 cash REAL NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-        "#)
+        "#,
+        )
         .execute(&self.pool)
         .await
         .map_err(|e| StorageError::Query(e.to_string()))?;
@@ -143,10 +153,12 @@ impl Storage {
             let id = Uuid::new_v4().to_string();
             let now = Utc::now().to_rfc3339();
 
-            sqlx::query(r#"
+            sqlx::query(
+                r#"
                 INSERT INTO account (id, cash, created_at, updated_at)
                 VALUES (?, ?, ?, ?)
-            "#)
+            "#,
+            )
             .bind(&id)
             .bind(starting_cash)
             .bind(&now)
@@ -171,9 +183,7 @@ impl Storage {
 
         // Calculate equity from positions
         let positions = self.get_positions().await?;
-        let positions_value: f64 = positions.iter()
-            .map(|p| p.quantity * p.current_price)
-            .sum();
+        let positions_value: f64 = positions.iter().map(|p| p.quantity * p.current_price).sum();
 
         let equity = cash + positions_value;
 
@@ -222,24 +232,25 @@ impl Storage {
     // ============ Positions ============
 
     pub async fn get_positions(&self) -> Result<Vec<Position>, StorageError> {
-        let rows = sqlx::query_as::<_, DbPosition>(
-            "SELECT * FROM positions WHERE quantity != 0"
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| StorageError::Query(e.to_string()))?;
+        let rows = sqlx::query_as::<_, DbPosition>("SELECT * FROM positions WHERE quantity != 0")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))?;
 
-        Ok(rows.into_iter().map(|p| Position {
-            symbol: p.symbol,
-            quantity: p.quantity,
-            avg_entry_price: p.avg_entry_price,
-            current_price: p.current_price,
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .map(|p| Position {
+                symbol: p.symbol,
+                quantity: p.quantity,
+                avg_entry_price: p.avg_entry_price,
+                current_price: p.current_price,
+            })
+            .collect())
     }
 
     pub async fn get_position(&self, symbol: &str) -> Result<Option<Position>, StorageError> {
         let row = sqlx::query_as::<_, DbPosition>(
-            "SELECT * FROM positions WHERE symbol = ? AND quantity != 0"
+            "SELECT * FROM positions WHERE symbol = ? AND quantity != 0",
         )
         .bind(symbol)
         .fetch_optional(&self.pool)
@@ -264,7 +275,8 @@ impl Storage {
         let id = Uuid::new_v4().to_string();
         let updated_at = Utc::now().to_rfc3339();
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             INSERT INTO positions (id, symbol, quantity, avg_entry_price, current_price, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol) DO UPDATE SET
@@ -272,7 +284,8 @@ impl Storage {
                 avg_entry_price = excluded.avg_entry_price,
                 current_price = excluded.current_price,
                 updated_at = excluded.updated_at
-        "#)
+        "#,
+        )
         .bind(&id)
         .bind(symbol)
         .bind(quantity)
@@ -286,7 +299,11 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn update_position_price(&self, symbol: &str, current_price: f64) -> Result<(), StorageError> {
+    pub async fn update_position_price(
+        &self,
+        symbol: &str,
+        current_price: f64,
+    ) -> Result<(), StorageError> {
         let updated_at = Utc::now().to_rfc3339();
 
         sqlx::query("UPDATE positions SET current_price = ?, updated_at = ? WHERE symbol = ?")
@@ -324,10 +341,12 @@ impl Storage {
         let id = Uuid::new_v4().to_string();
         let timestamp = Utc::now().to_rfc3339();
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             INSERT INTO trades (id, symbol, side, quantity, price, timestamp, order_id, strategy)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        "#)
+        "#,
+        )
         .bind(&id)
         .bind(symbol)
         .bind(side)
@@ -344,18 +363,20 @@ impl Storage {
     }
 
     pub async fn get_trades(&self, limit: i32) -> Result<Vec<DbTrade>, StorageError> {
-        sqlx::query_as::<_, DbTrade>(
-            "SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?"
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| StorageError::Query(e.to_string()))
+        sqlx::query_as::<_, DbTrade>("SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?")
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))
     }
 
-    pub async fn get_trades_by_symbol(&self, symbol: &str, limit: i32) -> Result<Vec<DbTrade>, StorageError> {
+    pub async fn get_trades_by_symbol(
+        &self,
+        symbol: &str,
+        limit: i32,
+    ) -> Result<Vec<DbTrade>, StorageError> {
         sqlx::query_as::<_, DbTrade>(
-            "SELECT * FROM trades WHERE symbol = ? ORDER BY timestamp DESC LIMIT ?"
+            "SELECT * FROM trades WHERE symbol = ? ORDER BY timestamp DESC LIMIT ?",
         )
         .bind(symbol)
         .bind(limit)
@@ -375,10 +396,12 @@ impl Storage {
         let id = Uuid::new_v4().to_string();
         let timestamp = Utc::now().to_rfc3339();
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             INSERT INTO account_snapshots (id, equity, cash, buying_power, timestamp)
             VALUES (?, ?, ?, ?, ?)
-        "#)
+        "#,
+        )
         .bind(&id)
         .bind(equity)
         .bind(cash)
@@ -391,9 +414,12 @@ impl Storage {
         Ok(id)
     }
 
-    pub async fn get_account_history(&self, limit: i32) -> Result<Vec<DbAccountSnapshot>, StorageError> {
+    pub async fn get_account_history(
+        &self,
+        limit: i32,
+    ) -> Result<Vec<DbAccountSnapshot>, StorageError> {
         sqlx::query_as::<_, DbAccountSnapshot>(
-            "SELECT * FROM account_snapshots ORDER BY timestamp DESC LIMIT ?"
+            "SELECT * FROM account_snapshots ORDER BY timestamp DESC LIMIT ?",
         )
         .bind(limit)
         .fetch_all(&self.pool)
@@ -413,10 +439,12 @@ impl Storage {
         let id = Uuid::new_v4().to_string();
         let timestamp = Utc::now().to_rfc3339();
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             INSERT INTO signals (id, symbol, signal_type, strength, strategy, timestamp)
             VALUES (?, ?, ?, ?, ?, ?)
-        "#)
+        "#,
+        )
         .bind(&id)
         .bind(symbol)
         .bind(signal_type)
@@ -431,12 +459,10 @@ impl Storage {
     }
 
     pub async fn get_signals(&self, limit: i32) -> Result<Vec<DbSignal>, StorageError> {
-        sqlx::query_as::<_, DbSignal>(
-            "SELECT * FROM signals ORDER BY timestamp DESC LIMIT ?"
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| StorageError::Query(e.to_string()))
+        sqlx::query_as::<_, DbSignal>("SELECT * FROM signals ORDER BY timestamp DESC LIMIT ?")
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))
     }
 }

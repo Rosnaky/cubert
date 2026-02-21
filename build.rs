@@ -1,6 +1,4 @@
-
 fn main() {
-
     let libpath = format!("{}/model", env!("CARGO_MANIFEST_DIR"));
 
     println!("cargo:rustc-link-search=native={}", libpath);

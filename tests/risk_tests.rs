@@ -1,13 +1,13 @@
-use cubert::risk::RiskManager;
 use cubert::config::RiskConfig;
-use cubert::types::{Signal, Account, Position, Side, OrderType};
+use cubert::risk::RiskManager;
+use cubert::types::{Account, OrderType, Position, Side, Signal};
 
 fn default_risk_config() -> RiskConfig {
     RiskConfig {
-        max_position_pct: 0.10,      // 10% max per position
+        max_position_pct: 0.10, // 10% max per position
         max_drawdown_pct: 0.05,
         max_daily_trades: 10,
-        max_total_exposure: 0.80,    // 80% max total
+        max_total_exposure: 0.80, // 80% max total
         max_loss_per_trade: 0.02,
     }
 }
@@ -44,14 +44,12 @@ fn test_risk_manager_approves_buy() {
 fn test_risk_manager_rejects_existing_position() {
     let mut rm = RiskManager::new(default_risk_config());
     let account = default_account();
-    let positions = vec![
-        Position {
-            symbol: "AAPL".to_string(),
-            quantity: 100.0,
-            avg_entry_price: 150.0,
-            current_price: 155.0,
-        }
-    ];
+    let positions = vec![Position {
+        symbol: "AAPL".to_string(),
+        quantity: 100.0,
+        avg_entry_price: 150.0,
+        current_price: 155.0,
+    }];
 
     let signal = Signal::Buy {
         symbol: "AAPL".to_string(),
@@ -75,8 +73,10 @@ fn test_risk_manager_position_sizing() {
         strength: 1.0,
     };
 
-    let order = rm.evaluate_signal(&signal, &account, &positions, 100.0).unwrap();
-    
+    let order = rm
+        .evaluate_signal(&signal, &account, &positions, 100.0)
+        .unwrap();
+
     // 10% of $100k = $10k, at $100/share = 100 shares
     assert_eq!(order.quantity, 100.0);
 }
@@ -93,8 +93,10 @@ fn test_risk_manager_scales_by_strength() {
         strength: 0.5,
     };
 
-    let order = rm.evaluate_signal(&signal, &account, &positions, 100.0).unwrap();
-    
+    let order = rm
+        .evaluate_signal(&signal, &account, &positions, 100.0)
+        .unwrap();
+
     // 10% * 0.5 = 5% of $100k = $5k, at $100/share = 50 shares
     assert_eq!(order.quantity, 50.0);
 }
@@ -115,20 +117,29 @@ fn test_risk_manager_respects_daily_limit() {
     };
 
     // First two trades should succeed
-    assert!(rm.evaluate_signal(&signal, &account, &positions, 150.0).is_some());
-    
+    assert!(
+        rm.evaluate_signal(&signal, &account, &positions, 150.0)
+            .is_some()
+    );
+
     let signal2 = Signal::Buy {
         symbol: "MSFT".to_string(),
         strength: 0.8,
     };
-    assert!(rm.evaluate_signal(&signal2, &account, &positions, 300.0).is_some());
+    assert!(
+        rm.evaluate_signal(&signal2, &account, &positions, 300.0)
+            .is_some()
+    );
 
     // Third trade should be rejected
     let signal3 = Signal::Buy {
         symbol: "GOOGL".to_string(),
         strength: 0.8,
     };
-    assert!(rm.evaluate_signal(&signal3, &account, &positions, 100.0).is_none());
+    assert!(
+        rm.evaluate_signal(&signal3, &account, &positions, 100.0)
+            .is_none()
+    );
 }
 
 #[test]
@@ -147,30 +158,37 @@ fn test_risk_manager_reset_daily() {
     };
 
     // First trade
-    assert!(rm.evaluate_signal(&signal, &account, &positions, 150.0).is_some());
+    assert!(
+        rm.evaluate_signal(&signal, &account, &positions, 150.0)
+            .is_some()
+    );
 
     // Should be rejected
-    assert!(rm.evaluate_signal(&signal, &account, &positions, 150.0).is_none());
+    assert!(
+        rm.evaluate_signal(&signal, &account, &positions, 150.0)
+            .is_none()
+    );
 
     // Reset
     rm.reset_daily();
 
     // Should work again
-    assert!(rm.evaluate_signal(&signal, &account, &positions, 150.0).is_some());
+    assert!(
+        rm.evaluate_signal(&signal, &account, &positions, 150.0)
+            .is_some()
+    );
 }
 
 #[test]
 fn test_risk_manager_sell_existing_position() {
     let mut rm = RiskManager::new(default_risk_config());
     let account = default_account();
-    let positions = vec![
-        Position {
-            symbol: "AAPL".to_string(),
-            quantity: 100.0,
-            avg_entry_price: 150.0,
-            current_price: 160.0,
-        }
-    ];
+    let positions = vec![Position {
+        symbol: "AAPL".to_string(),
+        quantity: 100.0,
+        avg_entry_price: 150.0,
+        current_price: 160.0,
+    }];
 
     let signal = Signal::Sell {
         symbol: "AAPL".to_string(),
@@ -182,7 +200,7 @@ fn test_risk_manager_sell_existing_position() {
     assert!(order.is_some());
     let order = order.unwrap();
     assert!(matches!(order.side, Side::Sell));
-    assert_eq!(order.quantity, 100.0);  // Sells entire position
+    assert_eq!(order.quantity, 100.0); // Sells entire position
 }
 
 #[test]
@@ -204,8 +222,8 @@ fn test_risk_manager_rejects_sell_no_position() {
 #[test]
 fn test_risk_manager_respects_total_exposure() {
     let config = RiskConfig {
-        max_position_pct: 0.50,       // 50% per position
-        max_total_exposure: 0.60,     // 60% total
+        max_position_pct: 0.50,   // 50% per position
+        max_total_exposure: 0.60, // 60% total
         ..default_risk_config()
     };
     let mut rm = RiskManager::new(config);
@@ -214,14 +232,12 @@ fn test_risk_manager_respects_total_exposure() {
         cash: 50_000.0,
         buying_power: 50_000.0,
     };
-    let positions = vec![
-        Position {
-            symbol: "AAPL".to_string(),
-            quantity: 100.0,
-            avg_entry_price: 500.0,
-            current_price: 500.0,  // $50k position = 50% exposure
-        }
-    ];
+    let positions = vec![Position {
+        symbol: "AAPL".to_string(),
+        quantity: 100.0,
+        avg_entry_price: 500.0,
+        current_price: 500.0, // $50k position = 50% exposure
+    }];
 
     let signal = Signal::Buy {
         symbol: "MSFT".to_string(),
@@ -230,7 +246,7 @@ fn test_risk_manager_respects_total_exposure() {
 
     // Should reject because adding more would exceed 60% total exposure
     let order = rm.evaluate_signal(&signal, &account, &positions, 300.0);
-    
+
     // May be rejected or reduced - depends on implementation
     if let Some(o) = order {
         let new_exposure = 50_000.0 + (o.quantity * 300.0);

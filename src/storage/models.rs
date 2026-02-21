@@ -1,4 +1,3 @@
-
 use sqlx::FromRow;
 
 #[derive(Debug, Clone, FromRow)]

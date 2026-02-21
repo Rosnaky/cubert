@@ -24,16 +24,16 @@ impl std::error::Error for DataError {}
 
 #[derive(Debug, Deserialize)]
 struct ApiBar {
-    t: String,          // Timestamp
-    o: f64,             // Open
-    h: f64,             // High
-    l: f64,             // Low
-    c: f64,             // Close
-    v: u64,             // Volume
+    t: String, // Timestamp
+    o: f64,    // Open
+    h: f64,    // High
+    l: f64,    // Low
+    c: f64,    // Close
+    v: u64,    // Volume
     #[serde(default)]
-    n: Option<u64>,     // Number of trades
+    n: Option<u64>, // Number of trades
     #[serde(default)]
-    vw: Option<f64>,    // Volume weighted price
+    vw: Option<f64>, // Volume weighted price
 }
 
 // Single symbol response: { "bars": [...], "symbol": "AAPL" }
@@ -78,7 +78,8 @@ impl MarketData {
             self.data_endpoint, symbol, timeframe, limit
         );
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .headers(self.auth_headers())
             .send()
@@ -98,10 +99,13 @@ impl MarketData {
         // println!("Status: {}", status);
         // println!("Raw response: {}", text);
 
-        let api_resp: ApiBarsResponse = resp.json().await
+        let api_resp: ApiBarsResponse = resp
+            .json()
+            .await
             .map_err(|e| DataError::ParseError(e.to_string()))?;
 
-        let bars = api_resp.bars
+        let bars = api_resp
+            .bars
             .iter()
             .map(|b| Bar {
                 symbol: symbol.to_string(),
@@ -113,14 +117,15 @@ impl MarketData {
                 volume: b.v,
             })
             .collect();
-        
+
         Ok(bars)
         // Ok(Vec::new())
     }
 
     pub async fn get_latest_bar(&self, symbol: &str) -> Result<Bar, DataError> {
         let bars = self.get_bars(symbol, "1Min", 1).await?;
-        bars.into_iter().next()
+        bars.into_iter()
+            .next()
             .ok_or_else(|| DataError::NotFound(format!("No bars for {}", symbol)))
     }
 }

@@ -1,8 +1,7 @@
-
 pub mod momentum;
 
-use async_trait::async_trait;
 use crate::types::{Bar, Signal};
+use async_trait::async_trait;
 
 #[derive(Debug, Clone)]
 pub struct StrategySettings {
@@ -38,14 +37,16 @@ pub trait Strategy: Send + Sync {
 
 pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {
     match &config.params {
-        StrategyParams::Momentum { lookback_period, threshold, .. } => {
-            Box::new(momentum::MomentumStrategy::new(
-                &config.name,
-                config.symbols.clone(),
-                *lookback_period,
-                *threshold,
-            ))
-        }
+        StrategyParams::Momentum {
+            lookback_period,
+            threshold,
+            ..
+        } => Box::new(momentum::MomentumStrategy::new(
+            &config.name,
+            config.symbols.clone(),
+            *lookback_period,
+            *threshold,
+        )),
         StrategyParams::MeanReversion { window, std_devs } => {
             todo!("Need to implement")
         }

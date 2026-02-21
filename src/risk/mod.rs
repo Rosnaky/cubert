@@ -1,10 +1,8 @@
-
-
 use crate::config::RiskConfig;
-use crate::types::OrderType;
-use crate::types::Side;
 use crate::types::Order;
+use crate::types::OrderType;
 use crate::types::Position;
+use crate::types::Side;
 use crate::types::Signal;
 
 use crate::types::Account;
@@ -50,9 +48,8 @@ impl RiskManager {
                     return None;
                 }
 
-                let current_exposure: f64 = positions.iter()
-                    .map(|p| p.quantity * p.current_price)
-                    .sum();
+                let current_exposure: f64 =
+                    positions.iter().map(|p| p.quantity * p.current_price).sum();
 
                 let new_exposure = current_exposure + (quantity * current_price);
 
@@ -70,7 +67,10 @@ impl RiskManager {
                 })
             }
 
-            Signal::Sell { symbol, strength: _ } => {
+            Signal::Sell {
+                symbol,
+                strength: _,
+            } => {
                 let position = positions.iter().find(|p| &p.symbol == symbol)?;
 
                 if position.quantity <= 0.0 {
@@ -78,7 +78,7 @@ impl RiskManager {
                 }
 
                 self.daily_trades += 1;
-                
+
                 Some(Order {
                     symbol: symbol.clone(),
                     side: Side::Sell,

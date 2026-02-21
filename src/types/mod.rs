@@ -1,4 +1,3 @@
-
 //! Type defintions
 
 use std::time::SystemTime;
@@ -48,7 +47,7 @@ pub struct Order {
     pub symbol: String,
     pub side: Side,
     pub quantity: f64,
-    pub order_type: OrderType
+    pub order_type: OrderType,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +55,7 @@ pub struct Position {
     pub symbol: String,
     pub quantity: f64, // Positive == long, negative == short
     pub avg_entry_price: f64,
-    pub current_price: f64
+    pub current_price: f64,
 }
 
 impl Position {
@@ -81,4 +80,3 @@ pub struct Account {
     pub cash: f64,
     pub buying_power: f64,
 }
-

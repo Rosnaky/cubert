@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use cubert::config::Config;
-use cubert::logging::Logger;
 use cubert::broker::alpaca::AlpacaApiBroker;
+use cubert::config::Config;
 use cubert::data::MarketData;
-use cubert::storage::Storage;
 use cubert::engine::Engine;
+use cubert::logging::Logger;
+use cubert::storage::Storage;
 use cubert::strategy::{StrategyParams, StrategySettings};
 
 #[tokio::main]
@@ -19,10 +19,8 @@ async fn main() {
     };
 
     let level = Logger::parse_level(&config.logging.level);
-    let logger = Arc::new(
-        Logger::new(level, Some(&config.logging.file))
-            .expect("Failed to create logger")
-    );
+    let logger =
+        Arc::new(Logger::new(level, Some(&config.logging.file)).expect("Failed to create logger"));
 
     logger.info("=== Cubert Starting ===");
 
@@ -49,7 +47,10 @@ async fn main() {
     // Verify account
     match storage.get_account().await {
         Ok(account) => {
-            logger.info(&format!("Account: ${:.2} cash, ${:.2} equity", account.cash, account.equity));
+            logger.info(&format!(
+                "Account: ${:.2} cash, ${:.2} equity",
+                account.cash, account.equity
+            ));
         }
         Err(e) => {
             logger.error(&format!("Account error: {}", e));
@@ -100,7 +101,8 @@ async fn main() {
         logger.clone(),
         config.risk.clone(),
         strategies.clone(),
-    ).await;
+    )
+    .await;
 
     for strategy in strategies {
         engine.add_strategy(strategy);

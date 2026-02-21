@@ -2,7 +2,6 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub broker: BrokerConfig,
@@ -32,7 +31,8 @@ pub struct DataConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct StrategyConfig {  // Renamed from StrategyConfig
+pub struct StrategyConfig {
+    // Renamed from StrategyConfig
     pub name: String,
     pub lookback_period: usize,
     pub threshold: f64,
@@ -68,7 +68,7 @@ pub enum ConfigError {
     FileNotFound(String),
     ParseError(String),
     IoError(std::io::Error),
-    MissingEnvVar(String)
+    MissingEnvVar(String),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -93,15 +93,15 @@ impl Config {
         let path = path.as_ref();
 
         dotenv::dotenv().ok();
-        
+
         if !path.exists() {
             return Err(ConfigError::FileNotFound(path.display().to_string()));
         }
 
         let contents = std::fs::read_to_string(path)?;
 
-        let mut config: Config = toml::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(e.to_string()))?;
+        let mut config: Config =
+            toml::from_str(&contents).map_err(|e| ConfigError::ParseError(e.to_string()))?;
 
         config.broker.api_key = std::env::var("ALPACA_API_KEY")
             .map_err(|_| ConfigError::MissingEnvVar("ALPACA_API_KEY".to_string()))?;

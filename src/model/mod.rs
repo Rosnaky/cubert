@@ -1,18 +1,21 @@
 use std::ffi::{c_float, c_int};
 
-
-
 #[repr(C)]
 pub struct StatsResult {
     pub mean: f64,
     pub variance: f64,
-    pub stddev: f64
+    pub stddev: f64,
 }
 
 #[link(name = "cudastats")]
 unsafe extern "C" {
     fn compute_stats(data: *const f32, n: c_int, result: *mut StatsResult) -> c_int;
-    fn compute_sharpe(returns: *const f32, n: c_int, risk_free_rate: f32, sharpe: *mut f64) -> c_int;
+    fn compute_sharpe(
+        returns: *const f32,
+        n: c_int,
+        risk_free_rate: f32,
+        sharpe: *mut f64,
+    ) -> c_int;
 }
 
 #[derive(Debug)]
@@ -40,12 +43,10 @@ pub fn stats(data: &[f32]) -> Result<StatsResult, ModelError> {
     let mut result = StatsResult {
         mean: 0.0,
         variance: 0.0,
-        stddev: 0.0
+        stddev: 0.0,
     };
 
-    let err = unsafe {
-        compute_stats(data.as_ptr(), data.len() as c_int, &mut result)
-    };
+    let err = unsafe { compute_stats(data.as_ptr(), data.len() as c_int, &mut result) };
 
     if err != 0 {
         return Err(ModelError::ModelErrorFail);
@@ -62,7 +63,12 @@ pub fn sharpe(returns: &[f32], risk_free_rate: f32) -> Result<f64, ModelError> {
     let mut result = 0.0;
 
     let err = unsafe {
-        compute_sharpe(returns.as_ptr(), returns.len() as c_int, risk_free_rate as c_float, &mut result)
+        compute_sharpe(
+            returns.as_ptr(),
+            returns.len() as c_int,
+            risk_free_rate as c_float,
+            &mut result,
+        )
     };
 
     if err != 0 {

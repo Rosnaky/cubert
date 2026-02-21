@@ -1,6 +1,5 @@
-
-use crate::strategy::Strategy;
 use crate::strategy::Bar;
+use crate::strategy::Strategy;
 use crate::types::Signal;
 use std::collections::HashMap;
 
@@ -13,12 +12,7 @@ pub struct MomentumStrategy {
 }
 
 impl MomentumStrategy {
-    pub fn new(
-        name: &str,
-        symbols: Vec<String>,
-        lookback_period: usize,
-        threshold: f64,
-    ) -> Self {
+    pub fn new(name: &str, symbols: Vec<String>, lookback_period: usize, threshold: f64) -> Self {
         let mut history = HashMap::new();
         for symbol in &symbols {
             history.insert(symbol.clone(), Vec::with_capacity(lookback_period + 1));
@@ -45,7 +39,7 @@ impl MomentumStrategy {
             return None;
         }
 
-        Some((current-past)/past)
+        Some((current - past) / past)
     }
 }
 
@@ -53,7 +47,7 @@ impl Strategy for MomentumStrategy {
     fn name(&self) -> &str {
         &self.name
     }
-    fn symbols (&self) -> &[String] {
+    fn symbols(&self) -> &[String] {
         &self.symbols
     }
     fn on_bar(&mut self, bar: &Bar) -> Option<Signal> {
@@ -75,14 +69,12 @@ impl Strategy for MomentumStrategy {
                 symbol: bar.symbol.clone(),
                 strength: momentum.min(1.0),
             })
-        }
-        else if momentum < -self.threshold {
+        } else if momentum < -self.threshold {
             Some(Signal::Sell {
                 symbol: bar.symbol.clone(),
                 strength: momentum.abs().min(1.0),
             })
-        }
-        else {
+        } else {
             None
         }
     }

@@ -1,9 +1,13 @@
-use std::{fs::{File, OpenOptions}, path::Path, sync::Mutex, io::Write};
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+    path::Path,
+    sync::Mutex,
+};
 
 use chrono::Local;
 
 use crate::types::{Order, Position, Signal};
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
@@ -26,7 +30,7 @@ impl std::fmt::Display for Level {
 
 pub struct Logger {
     level: Level,
-    file: Option<Mutex<File>>
+    file: Option<Mutex<File>>,
 }
 
 impl Logger {
@@ -36,13 +40,9 @@ impl Logger {
                 std::fs::create_dir_all(parent)?;
             }
 
-            let f = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
+            let f = OpenOptions::new().create(true).append(true).open(path)?;
             Some(Mutex::new(f))
-        } 
-        else {
+        } else {
             None
         };
 
@@ -55,7 +55,7 @@ impl Logger {
             "info" => Level::Info,
             "warn" => Level::Warn,
             "error" => Level::Error,
-            _ => Level::Info
+            _ => Level::Info,
         }
     }
 

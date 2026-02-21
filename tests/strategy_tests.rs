@@ -1,8 +1,8 @@
 use std::time::SystemTime;
 
+use cubert::strategy::Strategy; // Add this
 use cubert::strategy::momentum::MomentumStrategy;
-use cubert::strategy::Strategy;  // Add this
-use cubert::types::{Bar, Signal};  // Add Bar here
+use cubert::types::{Bar, Signal}; // Add Bar here
 
 fn make_bar(symbol: &str, close: f64) -> Bar {
     Bar {
@@ -18,12 +18,7 @@ fn make_bar(symbol: &str, close: f64) -> Bar {
 
 #[test]
 fn test_momentum_strategy_creation() {
-    let strategy = MomentumStrategy::new(
-        "test_momentum",
-        vec!["AAPL".to_string()],
-        5,
-        0.02
-    );
+    let strategy = MomentumStrategy::new("test_momentum", vec!["AAPL".to_string()], 5, 0.02);
 
     assert_eq!(strategy.name(), "test_momentum");
     assert_eq!(strategy.symbols(), &["AAPL".to_string()]);
@@ -34,7 +29,7 @@ fn test_momentum_needs_warmup() {
     let mut strategy = MomentumStrategy::new(
         "test",
         vec!["AAPL".to_string()],
-        5,  // lookback period
+        5, // lookback period
         0.02,
     );
 
@@ -42,7 +37,11 @@ fn test_momentum_needs_warmup() {
     for i in 0..4 {
         let bar = make_bar("AAPL", 100.0 + i as f64);
         let signal = strategy.on_bar(&bar);
-        assert!(signal.is_none(), "Should be None during warmup, got {:?}", signal);
+        assert!(
+            signal.is_none(),
+            "Should be None during warmup, got {:?}",
+            signal
+        );
     }
 }
 
@@ -52,7 +51,7 @@ fn test_momentum_generates_buy_signal() {
         "test",
         vec!["AAPL".to_string()],
         5,
-        0.02,  // 2% threshold
+        0.02, // 2% threshold
     );
 
     // Feed rising prices: 100, 101, 102, 103, 104, 105
@@ -76,12 +75,7 @@ fn test_momentum_generates_buy_signal() {
 
 #[test]
 fn test_momentum_generates_sell_signal() {
-    let mut strategy = MomentumStrategy::new(
-        "test",
-        vec!["AAPL".to_string()],
-        5,
-        0.02,
-    );
+    let mut strategy = MomentumStrategy::new("test", vec!["AAPL".to_string()], 5, 0.02);
 
     // Feed falling prices: 110, 108, 106, 104, 102, 100
     for i in 0..6 {
@@ -108,7 +102,7 @@ fn test_momentum_no_signal_in_range() {
         "test",
         vec!["AAPL".to_string()],
         5,
-        0.10,  // 10% threshold - high
+        0.10, // 10% threshold - high
     );
 
     // Feed flat prices
@@ -130,12 +124,7 @@ fn test_momentum_no_signal_in_range() {
 
 #[test]
 fn test_momentum_ignores_other_symbols() {
-    let mut strategy = MomentumStrategy::new(
-        "test",
-        vec!["AAPL".to_string()],
-        5,
-        0.02,
-    );
+    let mut strategy = MomentumStrategy::new("test", vec!["AAPL".to_string()], 5, 0.02);
 
     // Feed bars for a different symbol
     let bar = make_bar("MSFT", 100.0);
@@ -146,12 +135,7 @@ fn test_momentum_ignores_other_symbols() {
 
 #[test]
 fn test_strategy_reset() {
-    let mut strategy = MomentumStrategy::new(
-        "test",
-        vec!["AAPL".to_string()],
-        5,
-        0.02,
-    );
+    let mut strategy = MomentumStrategy::new("test", vec!["AAPL".to_string()], 5, 0.02);
 
     // Feed some data
     for i in 0..10 {
