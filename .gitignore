@@ -26,3 +26,4 @@ logs
 # Local files
 venv
 *.db
+__pycache__

@@ -24,7 +24,7 @@ async fn main() {
 
     logger.info("=== Cubert Starting ===");
 
-    let storage = match Storage::connect(&config.storage.database_url).await {
+    let storage = match Storage::connect(&config.storage.db_url).await {
         Ok(s) => s,
         Err(e) => {
             logger.error(&format!("Database error: {}", e));
