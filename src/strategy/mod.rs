@@ -47,7 +47,10 @@ pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {
             *lookback_period,
             *threshold,
         )),
-        StrategyParams::MeanReversion { window: _, std_devs: _ } => {
+        StrategyParams::MeanReversion {
+            window: _,
+            std_devs: _,
+        } => {
             todo!("Need to implement")
         }
         StrategyParams::Custom { .. } => {
