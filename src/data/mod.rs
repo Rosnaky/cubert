@@ -41,7 +41,7 @@ struct ApiBar {
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct ApiBarsResponse {
-    bars: Vec<ApiBar>,
+    bars: Option<Vec<ApiBar>>,
     symbol: String,
 }
 
@@ -100,6 +100,7 @@ impl MarketData {
 
         let bars = api_resp
             .bars
+            .unwrap_or_default()
             .iter()
             .map(|b| Bar {
                 symbol: symbol.to_string(),
