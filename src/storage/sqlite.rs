@@ -1,10 +1,8 @@
-//! SQLite storage implementation.
-
 use chrono::Utc;
 use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 use uuid::Uuid;
 
-use super::models::{DbAccount, DbAccountSnapshot, DbPosition, DbSignal, DbTrade};
+use super::models::{DbAccountSnapshot, DbPosition, DbSignal, DbTrade};
 use crate::types::{Account, Position};
 
 #[derive(Debug)]

@@ -1,5 +1,4 @@
 use cubert::storage::Storage;
-use cubert::types::{Account, Position};
 
 async fn setup_test_storage() -> Storage {
     // Use in-memory database

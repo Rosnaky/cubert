@@ -1,36 +1,5 @@
-use std::sync::Arc;
-use tempfile::tempdir;
 
-use cubert::broker::paper::PaperBroker;
-use cubert::config::RiskConfig;
-use cubert::logging::{Level, Logger};
 use cubert::storage::Storage;
-use cubert::strategy::{StrategyParams, StrategySettings};
-use cubert::types::Bar;
-
-// Mock data provider for testing
-struct MockMarketData {
-    prices: std::collections::HashMap<String, f64>,
-}
-
-impl MockMarketData {
-    fn new() -> Self {
-        let mut prices = std::collections::HashMap::new();
-        prices.insert("AAPL".to_string(), 150.0);
-        prices.insert("MSFT".to_string(), 300.0);
-        Self { prices }
-    }
-}
-
-fn default_risk_config() -> RiskConfig {
-    RiskConfig {
-        max_position_pct: 0.10,
-        max_drawdown_pct: 0.05,
-        max_daily_trades: 10,
-        max_total_exposure: 0.80,
-        max_loss_per_trade: 0.02,
-    }
-}
 
 #[tokio::test]
 async fn test_full_trade_cycle() {

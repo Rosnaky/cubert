@@ -1,6 +1,6 @@
 use cubert::config::RiskConfig;
 use cubert::risk::RiskManager;
-use cubert::types::{Account, OrderType, Position, Side, Signal};
+use cubert::types::{Account, Position, Side, Signal};
 
 fn default_risk_config() -> RiskConfig {
     RiskConfig {

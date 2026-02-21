@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::{data, types::Bar};
+use crate::types::Bar;
 
 #[derive(Debug)]
 pub enum DataError {
@@ -23,6 +23,7 @@ impl std::fmt::Display for DataError {
 impl std::error::Error for DataError {}
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ApiBar {
     t: String, // Timestamp
     o: f64,    // Open
@@ -38,6 +39,7 @@ struct ApiBar {
 
 // Single symbol response: { "bars": [...], "symbol": "AAPL" }
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ApiBarsResponse {
     bars: Vec<ApiBar>,
     symbol: String,
@@ -90,14 +92,6 @@ impl MarketData {
             let body = resp.text().await.unwrap_or_default();
             return Err(DataError::ConnectionFailed(body));
         }
-
-        // let status = resp.status();
-        // let text = resp.text().await
-        //     .map_err(|e| DataError::ConnectionFailed(e.to_string()))?;
-
-        // // Log it to see what you're actually getting
-        // println!("Status: {}", status);
-        // println!("Raw response: {}", text);
 
         let api_resp: ApiBarsResponse = resp
             .json()

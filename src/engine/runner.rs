@@ -4,7 +4,7 @@ use tokio::{sync::mpsc, time::interval};
 
 use crate::{
     broker::alpaca::AlpacaApiBroker,
-    config::{RiskConfig, StrategyConfig},
+    config::RiskConfig,
     data::MarketData,
     logging::Logger,
     risk::RiskManager,
@@ -32,8 +32,8 @@ pub struct Engine {
     state: Arc<SharedState>,
     strategies: Vec<Box<dyn Strategy>>,
     risk_manager: RiskManager,
-    signal_tx: mpsc::Sender<SignalMessage>,
-    signal_rx: mpsc::Receiver<SignalMessage>,
+    _signal_tx: mpsc::Sender<SignalMessage>,
+    _signal_rx: mpsc::Receiver<SignalMessage>,
     strategy_configs: Vec<StrategySettings>,
 }
 
@@ -59,8 +59,8 @@ impl Engine {
             state,
             strategies: Vec::new(),
             risk_manager: RiskManager::new(risk_config),
-            signal_tx,
-            signal_rx,
+            _signal_tx: signal_tx,
+            _signal_rx: signal_rx,
             strategy_configs,
         }
     }
@@ -125,14 +125,14 @@ impl Engine {
 
             for strategy in &mut self.strategies {
                 for symbol in strategy.symbols().to_vec() {
-                    if let Some(bar) = bars.get(&symbol) {
-                        if let Some(signal) = strategy.on_bar(bar) {
-                            match &signal {
-                                Signal::Buy { .. } | Signal::Sell { .. } => {
-                                    signals.push((strategy.name().to_string(), signal, bar.close));
-                                }
-                                Signal::Hold => {}
+                    if let Some(bar) = bars.get(&symbol)
+                        && let Some(signal) = strategy.on_bar(bar)
+                    {
+                        match &signal {
+                            Signal::Buy { .. } | Signal::Sell { .. } => {
+                                signals.push((strategy.name().to_string(), signal, bar.close));
                             }
+                            Signal::Hold => {}
                         }
                     }
                 }
@@ -300,7 +300,7 @@ impl Engine {
                 StrategyParams::MeanReversion { .. } => {
                     ("1Hour", 50) // Default fallback
                 }
-                StrategyParams::Custom { params } => {
+                StrategyParams::Custom { params: _ } => {
                     ("1Hour", 50) // Default fallback
                 }
             };

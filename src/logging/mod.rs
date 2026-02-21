@@ -69,10 +69,9 @@ impl Logger {
 
         println!("{}", line);
 
-        if let Some(ref file_mutex) = self.file {
-            if let Ok(mut file) = file_mutex.lock() {
-                let _ = writeln!(file, "{}", line);
-            }
+        if let Some(ref file_mutex) = self.file
+            && let Ok(mut file) = file_mutex.lock() {
+            let _ = writeln!(file, "{}", line);
         }
     }
 
