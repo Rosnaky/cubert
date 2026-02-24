@@ -59,8 +59,8 @@ pub struct LoggingConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct StorageConfig {
-    #[serde(default)]
     pub db_url: String,
+    pub broker_db_url: String,
 }
 
 #[derive(Debug)]
@@ -108,9 +108,6 @@ impl Config {
 
         config.broker.api_secret = std::env::var("ALPACA_API_SECRET")
             .map_err(|_| ConfigError::MissingEnvVar("ALPACA_API_SECRET".to_string()))?;
-
-        config.storage.db_url = std::env::var("DATABASE_URL")
-            .map_err(|_| ConfigError::MissingEnvVar("DATABASE_URL".to_string()))?;
 
         Ok(config)
     }

@@ -1,4 +1,6 @@
+use async_trait::async_trait;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use crate::{
     broker::{Broker, BrokerError, OrderId},
@@ -6,57 +8,75 @@ use crate::{
 };
 
 pub struct PaperBroker {
-    account: Account,
-    positions: HashMap<String, Position>,
-    next_order_id: u64,
-    prices: HashMap<String, f64>,
+    account: Mutex<Account>,
+    positions: Mutex<HashMap<String, Position>>,
+    next_order_id: Mutex<u64>,
+    prices: Mutex<HashMap<String, f64>>,
 }
 
 impl PaperBroker {
     pub fn new(starting_cash: f64) -> Self {
         Self {
-            account: Account {
+            account: Mutex::new(Account {
                 equity: starting_cash,
                 cash: starting_cash,
                 buying_power: starting_cash,
-            },
-            positions: HashMap::new(),
-            next_order_id: 1,
-            prices: HashMap::new(),
+            }),
+            positions: Mutex::new(HashMap::new()),
+            next_order_id: Mutex::new(1),
+            prices: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn set_price(&mut self, symbol: &str, price: f64) {
-        self.prices.insert(symbol.to_string(), price);
-        if let Some(pos) = self.positions.get_mut(symbol) {
+    pub fn set_price(&self, symbol: &str, price: f64) {
+        self.prices
+            .lock()
+            .unwrap()
+            .insert(symbol.to_string(), price);
+        if let Some(pos) = self.positions.lock().unwrap().get_mut(symbol) {
             pos.current_price = price;
         }
     }
 
-    fn get_price(&mut self, symbol: &str) -> Option<f64> {
-        self.prices.get(symbol).copied()
+    fn get_price(&self, symbol: &str) -> Option<f64> {
+        self.prices.lock().unwrap().get(symbol).copied()
     }
 
-    fn generate_order_id(&mut self) -> OrderId {
-        let id = format!("PAPER-{:06}", self.next_order_id);
-        self.next_order_id += 1;
+    fn generate_order_id(&self) -> OrderId {
+        let mut id_counter = self.next_order_id.lock().unwrap();
+        let id = format!("PAPER-{:06}", *id_counter);
+        *id_counter += 1;
         id
     }
 
-    fn update_account(&mut self) {
-        let positions_value: f64 = self
-            .positions
+    fn update_account(&self) {
+        let positions = self.positions.lock().unwrap();
+        let positions_value: f64 = positions
             .values()
             .map(|p| p.quantity * p.current_price)
             .sum();
 
-        self.account.equity = positions_value + self.account.cash;
-        self.account.buying_power = self.account.cash;
+        let mut account = self.account.lock().unwrap();
+        account.equity = positions_value + account.cash;
+        account.buying_power = account.cash;
     }
 }
 
+#[async_trait]
 impl Broker for PaperBroker {
-    fn submit_order(&mut self, order: &Order) -> Result<OrderId, BrokerError> {
+    async fn get_account(&self) -> Result<Account, BrokerError> {
+        Ok(self.account.lock().unwrap().clone())
+    }
+
+    async fn get_positions(&self) -> Result<Vec<Position>, BrokerError> {
+        Ok(self.positions.lock().unwrap().values().cloned().collect())
+    }
+
+    async fn get_position(&self, symbol: &str) -> Result<Option<Position>, BrokerError> {
+        Ok(self.positions.lock().unwrap().get(symbol).cloned())
+    }
+
+    async fn submit_order(&self, order: &Order) -> Result<OrderId, BrokerError> {
         let price = match order.order_type {
             OrderType::Market => self.get_price(&order.symbol).ok_or_else(|| {
                 BrokerError::InvalidOrder(format!("No price for {}", order.symbol))
@@ -69,20 +89,24 @@ impl Broker for PaperBroker {
 
         match order.side {
             Side::Buy => {
-                if order_value > self.account.cash {
-                    return Err(BrokerError::InsufficientFunds);
+                {
+                    let account = self.account.lock().unwrap();
+                    if order_value > account.cash {
+                        return Err(BrokerError::InsufficientFunds);
+                    }
                 }
 
-                self.account.cash -= order_value;
+                self.account.lock().unwrap().cash -= order_value;
 
-                if let Some(pos) = self.positions.get_mut(&order.symbol) {
+                let mut positions = self.positions.lock().unwrap();
+                if let Some(pos) = positions.get_mut(&order.symbol) {
                     let total_qty = pos.quantity + order.quantity;
                     let total_cost = (pos.quantity * pos.avg_entry_price) + order_value;
                     pos.avg_entry_price = total_cost / total_qty;
                     pos.quantity = total_qty;
                     pos.current_price = price;
                 } else {
-                    self.positions.insert(
+                    positions.insert(
                         order.symbol.clone(),
                         Position {
                             symbol: order.symbol.clone(),
@@ -94,7 +118,8 @@ impl Broker for PaperBroker {
                 }
             }
             Side::Sell => {
-                let pos = self.positions.get_mut(&order.symbol).ok_or_else(|| {
+                let mut positions = self.positions.lock().unwrap();
+                let pos = positions.get_mut(&order.symbol).ok_or_else(|| {
                     BrokerError::InvalidOrder(format!("No position for {}", order.symbol))
                 })?;
 
@@ -102,12 +127,14 @@ impl Broker for PaperBroker {
                     return Err(BrokerError::InvalidOrder("Insufficient shares".to_string()));
                 }
 
-                self.account.cash += order_value;
+                self.account.lock().unwrap().cash += order_value;
 
                 pos.quantity -= order.quantity;
 
                 if pos.quantity <= 0.0 {
-                    self.positions.remove(&order.symbol);
+                    let symbol = order.symbol.clone();
+                    drop(positions);
+                    self.positions.lock().unwrap().remove(&symbol);
                 }
             }
         }
@@ -116,19 +143,24 @@ impl Broker for PaperBroker {
         Ok(self.generate_order_id())
     }
 
-    fn cancel_order(&mut self, _order_id: &OrderId) -> Result<(), BrokerError> {
+    async fn update_prices(&self, symbols: &[String]) -> Result<(), BrokerError> {
+        // PaperBroker uses set_price() externally, so this is a no-op
+        // or you could update positions with stored prices
+        let prices = self.prices.lock().unwrap();
+        let mut positions = self.positions.lock().unwrap();
+
+        for symbol in symbols {
+            if let Some(price) = prices.get(symbol)
+                && let Some(pos) = positions.get_mut(symbol)
+            {
+                pos.current_price = *price;
+            }
+        }
+
+        drop(positions);
+        drop(prices);
+        self.update_account();
+
         Ok(())
-    }
-
-    fn get_position(&self, symbol: &str) -> Option<Position> {
-        self.positions.get(symbol).cloned()
-    }
-
-    fn get_positions(&self) -> Vec<Position> {
-        self.positions.values().cloned().collect()
-    }
-
-    fn get_account(&self) -> Account {
-        self.account.clone()
     }
 }

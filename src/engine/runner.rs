@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
 use crate::{
-    broker::alpaca::AlpacaApiBroker,
+    broker::Broker,
     config::RiskConfig,
     data::MarketData,
     logging::Logger,
@@ -22,7 +22,7 @@ pub struct SignalMessage {
 /// Shared data accessible by any component
 pub struct SharedState {
     pub storage: Storage,
-    pub broker: AlpacaApiBroker,
+    pub broker: Arc<dyn Broker>,
     pub data: MarketData,
     pub logger: Arc<Logger>,
 }
@@ -40,7 +40,7 @@ pub struct Engine {
 impl Engine {
     pub async fn new(
         storage: Storage,
-        broker: AlpacaApiBroker,
+        broker: Arc<dyn Broker>,
         data: MarketData,
         logger: Arc<Logger>,
         risk_config: RiskConfig,
@@ -101,6 +101,8 @@ impl Engine {
         loop {
             self.state.logger.info("=== Tick starting ===");
 
+            self.state.broker.update_prices(&all_symbols).await.ok();
+
             // Fetch latest data for all symbols
             let mut bars = HashMap::new();
             for symbol in &all_symbols {
@@ -148,7 +150,7 @@ impl Engine {
             }
 
             // Save account snapshot
-            match self.state.storage.get_account().await {
+            match self.state.broker.get_account().await {
                 Ok(account) => {
                     let _ = self
                         .state
@@ -206,7 +208,7 @@ impl Engine {
             .await;
 
         // Get account and positions for risk check
-        let account = match self.state.storage.get_account().await {
+        let account = match self.state.broker.get_account().await {
             Ok(a) => a,
             Err(e) => {
                 self.state
@@ -216,7 +218,7 @@ impl Engine {
             }
         };
 
-        let positions = match self.state.storage.get_positions().await {
+        let positions = match self.state.broker.get_positions().await {
             Ok(p) => p,
             Err(e) => {
                 self.state

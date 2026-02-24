@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use cubert::broker::Broker;
 use cubert::broker::alpaca::AlpacaApiBroker;
+use cubert::broker::paper_alpaca::PaperAlpacaBroker;
 use cubert::config::Config;
 use cubert::data::MarketData;
 use cubert::engine::Engine;
@@ -24,6 +26,7 @@ async fn main() {
 
     logger.info("=== Cubert Starting ===");
 
+    // Engine storage (for logging signals, snapshots, etc.)
     let storage = match Storage::connect(&config.storage.db_url).await {
         Ok(s) => s,
         Err(e) => {
@@ -37,15 +40,50 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // Initialize account with starting cash (only creates if doesn't exist)
-    let starting_cash = 100_000.0;
-    if let Err(e) = storage.init_account(starting_cash).await {
-        logger.error(&format!("Failed to init account: {}", e));
-        std::process::exit(1);
-    }
+    // Create broker based on config
+    let broker: Arc<dyn Broker> = if config.broker.paper {
+        logger.info("Using paper broker (simulated)");
+
+        // Broker storage (simulates broker API)
+        let broker_storage = match Storage::connect(&config.storage.broker_db_url).await {
+            Ok(s) => s,
+            Err(e) => {
+                logger.error(&format!("Broker database error: {}", e));
+                std::process::exit(1);
+            }
+        };
+
+        if let Err(e) = broker_storage.migrate().await {
+            logger.error(&format!("Broker migration failed: {}", e));
+            std::process::exit(1);
+        }
+
+        let starting_cash = 100_000.0;
+        if let Err(e) = broker_storage.init_account(starting_cash).await {
+            logger.error(&format!("Failed to init account: {}", e));
+            std::process::exit(1);
+        }
+
+        let data = MarketData::new(
+            &config.broker.data_endpoint,
+            &config.broker.api_key,
+            &config.broker.api_secret,
+        );
+
+        Arc::new(PaperAlpacaBroker::new(broker_storage, data))
+    } else {
+        logger.info("Using Alpaca live broker");
+
+        Arc::new(AlpacaApiBroker::new(
+            &config.broker.api_endpoint,
+            &config.broker.api_key,
+            &config.broker.api_secret,
+            false,
+        ))
+    };
 
     // Verify account
-    match storage.get_account().await {
+    match broker.get_account().await {
         Ok(account) => {
             logger.info(&format!(
                 "Account: ${:.2} cash, ${:.2} equity",
@@ -58,13 +96,7 @@ async fn main() {
         }
     }
 
-    let broker = AlpacaApiBroker::new(
-        &config.broker.api_endpoint,
-        &config.broker.api_key,
-        &config.broker.api_secret,
-        config.broker.paper,
-    );
-
+    // Market data
     let data = MarketData::new(
         &config.broker.data_endpoint,
         &config.broker.api_key,
