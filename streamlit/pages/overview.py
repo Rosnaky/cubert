@@ -4,7 +4,7 @@ import sys
 sys.path.append('..')
 from utils.db import (
     get_account_stats,
-    get_broker_trades,
+    get_engine_trades,
     get_signals,
     get_positions,
     get_account_history,
@@ -118,7 +118,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("🔄 Recent Trades")
-    trades_df = get_broker_trades(limit=10)
+    trades_df = get_engine_trades(limit=10)
     if not trades_df.empty:
         trades_df['value'] = trades_df['quantity'] * trades_df['price']
         st.dataframe(
@@ -155,4 +155,3 @@ with col2:
         )
     else:
         st.info("No signals yet")
-        
