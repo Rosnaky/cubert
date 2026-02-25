@@ -103,28 +103,20 @@ async fn main() {
         &config.broker.api_secret,
     );
 
-    let strategies = vec![
-        StrategySettings {
-            name: "momentum_tech".to_string(),
-            symbols: vec!["AAPL".to_string(), "MSFT".to_string()],
+    let strategies: Vec<StrategySettings> = config
+        .strategies
+        .iter()
+        .map(|s| StrategySettings {
+            name: s.name.clone(),
+            symbols: s.symbols.clone(),
             params: StrategyParams::Momentum {
-                lookback_period: 20,
-                threshold: 0.02,
-                startup_lookback: "1Hour".to_string(),
-                startup_bar_limit: 50,
+                lookback_period: s.params.lookback_period,
+                threshold: s.params.threshold,
+                startup_lookback: s.params.startup_lookback.clone(),
+                startup_bar_limit: s.params.startup_bar_limit,
             },
-        },
-        StrategySettings {
-            name: "momentum_ev".to_string(),
-            symbols: vec!["TSLA".to_string()],
-            params: StrategyParams::Momentum {
-                lookback_period: 10,
-                threshold: 0.03,
-                startup_lookback: "30Min".to_string(),
-                startup_bar_limit: 30,
-            },
-        },
-    ];
+        })
+        .collect();
 
     let mut engine = Engine::new(
         storage,

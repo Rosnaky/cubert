@@ -153,6 +153,18 @@ impl Broker for PaperAlpacaBroker {
                 Err(_) => continue, // Skip if can't fetch
             }
         }
+
+        let account = self
+            .storage
+            .get_account()
+            .await
+            .map_err(|e| BrokerError::Fail(e.to_string()))?;
+
+        self.storage
+            .insert_account_snapshot(account.equity, account.cash, account.buying_power)
+            .await
+            .map_err(|e| BrokerError::Fail(e.to_string()))?;
+
         Ok(())
     }
 }
