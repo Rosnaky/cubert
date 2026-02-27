@@ -94,7 +94,7 @@ impl Engine {
             .info(&format!("Tracking symbols: {:?}", all_symbols));
 
         // Prefetch historical data
-        self.fetch_historical_data(&all_symbols).await;
+        self.fetch_historical_data().await;
 
         let mut ticker = interval(Duration::from_secs(poll_interval_secs));
 
@@ -271,63 +271,51 @@ impl Engine {
         }
     }
 
-    async fn fetch_historical_data(&mut self, symbols: &Vec<String>) {
+    async fn fetch_historical_data(&mut self) {
         self.state
             .logger
             .info("Fetching historical data for all symbols...");
 
-        for symbol in symbols {
-            // Find the strategy config for this symbol
-            let config = match self
-                .strategy_configs
-                .iter()
-                .find(|c| c.symbols.contains(symbol))
-            {
-                Some(c) => c,
-                None => {
-                    self.state
-                        .logger
-                        .error(&format!("No strategy config for {}", symbol));
-                    continue;
-                }
-            };
-
-            // Extract startup params from strategy params
+        for config in self.strategy_configs.clone() {
             let (timeframe, bar_limit) = match &config.params {
                 StrategyParams::Momentum {
                     startup_lookback,
                     startup_bar_limit,
                     ..
-                } => (startup_lookback.as_str(), *startup_bar_limit),
-                StrategyParams::MeanReversion { .. } => {
-                    ("1Hour", 50) // Default fallback
-                }
-                StrategyParams::Custom { params: _ } => {
-                    ("1Hour", 50) // Default fallback
-                }
+                } => (startup_lookback.clone(), *startup_bar_limit),
+                StrategyParams::MeanReversion { .. } => ("1Hour".to_string(), 50),
+                StrategyParams::Custom { .. } => ("1Hour".to_string(), 50),
             };
 
-            match self.state.data.get_bars(symbol, timeframe, bar_limit).await {
-                Ok(bars) => {
-                    self.state.logger.info(&format!(
-                        "{}: loaded {} bars ({})",
-                        symbol,
-                        bars.len(),
-                        timeframe
-                    ));
-
-                    for bar in &bars {
-                        for strategy in &mut self.strategies {
-                            if strategy.symbols().contains(symbol) {
-                                let _ = strategy.on_bar(bar);
+            for symbol in &config.symbols {
+                match self
+                    .state
+                    .data
+                    .get_bars(symbol, &timeframe, bar_limit)
+                    .await
+                {
+                    Ok(bars) => {
+                        self.state.logger.info(&format!(
+                            "{}: loaded {} bars ({})",
+                            symbol,
+                            bars.len(),
+                            timeframe
+                        ));
+                        for bar in &bars {
+                            for strategy in &mut self.strategies {
+                                if strategy.name() == config.name
+                                    && strategy.symbols().contains(symbol)
+                                {
+                                    let _ = strategy.on_bar(bar);
+                                }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    self.state
-                        .logger
-                        .error(&format!("Failed to load history for {}: {}", symbol, e));
+                    Err(e) => {
+                        self.state
+                            .logger
+                            .error(&format!("Failed to load history for {}: {}", symbol, e));
+                    }
                 }
             }
         }
