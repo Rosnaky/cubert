@@ -94,7 +94,7 @@ impl Engine {
             .info(&format!("Tracking symbols: {:?}", all_symbols));
 
         // Prefetch historical data
-        self.fetch_historical_data().await;
+        self.fetch_historical_data(&all_symbols).await;
 
         let mut ticker = interval(Duration::from_secs(poll_interval_secs));
 
@@ -104,23 +104,23 @@ impl Engine {
             self.state.broker.update_prices(&all_symbols).await.ok();
 
             // Fetch latest data for all symbols
-            let mut bars = HashMap::new();
-            for symbol in &all_symbols {
-                self.state.logger.info(&format!("Fetching {}...", symbol));
-                match self.state.data.get_latest_bar(symbol).await {
-                    Ok(bar) => {
+            self.state.logger.info("Fetching latest bars...");
+            let bars = match self.state.data.get_latest_bars(&all_symbols).await {
+                Ok(b) => {
+                    for (symbol, bar) in &b {
                         self.state
                             .logger
                             .info(&format!("{}: ${:.2}", symbol, bar.close));
-                        bars.insert(symbol.clone(), bar);
                     }
-                    Err(e) => {
-                        self.state
-                            .logger
-                            .error(&format!("Failed to fetch {}: {}", symbol, e));
-                    }
+                    b
                 }
-            }
+                Err(e) => {
+                    self.state
+                        .logger
+                        .error(&format!("Failed to fetch bars: {}", e));
+                    HashMap::new()
+                }
+            };
 
             // Collect signals first
             let mut signals: Vec<(String, Signal, f64)> = Vec::new();
@@ -271,51 +271,65 @@ impl Engine {
         }
     }
 
-    async fn fetch_historical_data(&mut self) {
+    async fn fetch_historical_data(&mut self, symbols: &[String]) {
         self.state
             .logger
             .info("Fetching historical data for all symbols...");
 
-        for config in self.strategy_configs.clone() {
-            let (timeframe, bar_limit) = match &config.params {
-                StrategyParams::Momentum {
+        // Group symbols by their timeframe/limit config
+        let mut by_config: HashMap<(String, u32), Vec<String>> = HashMap::new();
+
+        for symbol in symbols {
+            let config = self
+                .strategy_configs
+                .iter()
+                .find(|c| c.symbols.contains(symbol));
+
+            let (timeframe, limit) = match config.map(|c| &c.params) {
+                Some(StrategyParams::Momentum {
                     startup_lookback,
                     startup_bar_limit,
                     ..
-                } => (startup_lookback.clone(), *startup_bar_limit),
-                StrategyParams::MeanReversion { .. } => ("1Hour".to_string(), 50),
-                StrategyParams::Custom { .. } => ("1Hour".to_string(), 50),
+                }) => (startup_lookback.clone(), *startup_bar_limit),
+                _ => ("1Hour".to_string(), 50),
             };
 
-            for symbol in &config.symbols {
-                match self
-                    .state
-                    .data
-                    .get_bars(symbol, &timeframe, bar_limit)
-                    .await
-                {
-                    Ok(bars) => {
+            by_config
+                .entry((timeframe, limit))
+                .or_default()
+                .push(symbol.clone());
+        }
+
+        // Batch fetch for each config group
+        for ((timeframe, limit), group_symbols) in by_config {
+            match self
+                .state
+                .data
+                .get_bars_batch(&group_symbols, &timeframe, limit)
+                .await
+            {
+                Ok(bars_map) => {
+                    for (symbol, bars) in &bars_map {
                         self.state.logger.info(&format!(
                             "{}: loaded {} bars ({})",
                             symbol,
                             bars.len(),
                             timeframe
                         ));
-                        for bar in &bars {
+
+                        for bar in bars {
                             for strategy in &mut self.strategies {
-                                if strategy.name() == config.name
-                                    && strategy.symbols().contains(symbol)
-                                {
+                                if strategy.symbols().contains(symbol) {
                                     let _ = strategy.on_bar(bar);
                                 }
                             }
                         }
                     }
-                    Err(e) => {
-                        self.state
-                            .logger
-                            .error(&format!("Failed to load history for {}: {}", symbol, e));
-                    }
+                }
+                Err(e) => {
+                    self.state
+                        .logger
+                        .error(&format!("Failed to load history: {}", e));
                 }
             }
         }

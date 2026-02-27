@@ -142,16 +142,17 @@ impl Broker for PaperAlpacaBroker {
     }
 
     async fn update_prices(&self, symbols: &[String]) -> Result<(), BrokerError> {
-        for symbol in symbols {
-            match self.data.get_latest_bar(symbol).await {
-                Ok(bar) => {
-                    self.storage
-                        .update_position_price(symbol, bar.close)
-                        .await
-                        .map_err(|e| BrokerError::Fail(e.to_string()))?;
-                }
-                Err(_) => continue, // Skip if can't fetch
-            }
+        let bars = self
+            .data
+            .get_latest_bars(symbols)
+            .await
+            .map_err(|e| BrokerError::Fail(e.to_string()))?;
+
+        for (symbol, bar) in &bars {
+            self.storage
+                .update_position_price(symbol, bar.close)
+                .await
+                .map_err(|e| BrokerError::Fail(e.to_string()))?;
         }
 
         let account = self

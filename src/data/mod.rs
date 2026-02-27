@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -41,7 +43,7 @@ struct ApiBar {
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct ApiBarsResponse {
-    bars: Option<Vec<ApiBar>>,
+    bars: Option<HashMap<String, ApiBar>>,
     symbol: String,
 }
 
@@ -50,6 +52,16 @@ struct ApiBarsResponse {
 struct ApiLatestBarResponse {
     bar: Option<ApiBar>,
     symbol: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiMultiBarsResponse {
+    bars: Option<HashMap<String, ApiBar>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiMultiBarsHistoryResponse {
+    bars: Option<HashMap<String, Vec<ApiBar>>>,
 }
 
 pub struct MarketData {
@@ -76,21 +88,22 @@ impl MarketData {
         headers
     }
 
-    pub async fn get_bars(
+    pub async fn get_bars_batch(
         &self,
-        symbol: &str,
+        symbols: &[String],
         timeframe: &str,
         limit: u32,
-    ) -> Result<Vec<Bar>, DataError> {
+    ) -> Result<HashMap<String, Vec<Bar>>, DataError> {
         use chrono::{Duration, Utc};
 
         let end = Utc::now();
         let start = end - Duration::days(7);
+        let symbols_param = symbols.join(",");
 
         let url = format!(
-            "{}/v2/stocks/{}/bars?timeframe={}&limit={}&start={}&feed=iex",
+            "{}/v2/stocks/bars?symbols={}&timeframe={}&limit={}&start={}&feed=iex",
             self.data_endpoint,
-            symbol,
+            symbols_param,
             timeframe,
             limit,
             start.format("%Y-%m-%dT%H:%M:%SZ")
@@ -109,35 +122,52 @@ impl MarketData {
             return Err(DataError::ConnectionFailed(body));
         }
 
-        let api_resp: ApiBarsResponse = resp
+        let api_resp: ApiMultiBarsHistoryResponse = resp
             .json()
             .await
             .map_err(|e| DataError::ParseError(e.to_string()))?;
 
-        let bars = api_resp
-            .bars
-            .unwrap_or_default()
-            .iter()
-            .map(|b| Bar {
-                symbol: symbol.to_string(),
-                timestamp: std::time::SystemTime::now(),
-                open: b.o,
-                high: b.h,
-                low: b.l,
-                close: b.c,
-                volume: b.v,
-            })
-            .collect();
+        let mut result = HashMap::new();
+        if let Some(bars_map) = api_resp.bars {
+            for (symbol, api_bars) in bars_map {
+                let bars: Vec<Bar> = api_bars
+                    .into_iter()
+                    .map(|b| Bar {
+                        symbol: symbol.clone(),
+                        timestamp: std::time::SystemTime::now(),
+                        open: b.o,
+                        high: b.h,
+                        low: b.l,
+                        close: b.c,
+                        volume: b.v,
+                    })
+                    .collect();
+                result.insert(symbol, bars);
+            }
+        }
 
-        Ok(bars)
-        // Ok(Vec::new())
+        Ok(result)
     }
 
-    pub async fn get_latest_bar(&self, symbol: &str) -> Result<Bar, DataError> {
-        // Try real-time latest first
+    pub async fn get_bars(
+        &self,
+        symbol: &str,
+        timeframe: &str,
+        limit: u32,
+    ) -> Result<Vec<Bar>, DataError> {
+        let symbols = vec![symbol.to_string()];
+        let mut result = self.get_bars_batch(&symbols, timeframe, limit).await?;
+        Ok(result.remove(symbol).unwrap_or_default())
+    }
+
+    pub async fn get_latest_bars(
+        &self,
+        symbols: &[String],
+    ) -> Result<HashMap<String, Bar>, DataError> {
+        let symbols_param = symbols.join(",");
         let url = format!(
-            "{}/v2/stocks/{}/bars/latest?feed=iex",
-            self.data_endpoint, symbol
+            "{}/v2/stocks/bars/latest?symbols={}&feed=iex",
+            self.data_endpoint, symbols_param
         );
 
         let resp = self
@@ -149,28 +179,48 @@ impl MarketData {
             .map_err(|e| DataError::ConnectionFailed(e.to_string()))?;
 
         if resp.status().is_success() {
-            let api_resp: ApiLatestBarResponse = resp
+            let api_resp: ApiMultiBarsResponse = resp
                 .json()
                 .await
                 .map_err(|e| DataError::ParseError(e.to_string()))?;
 
-            if let Some(b) = api_resp.bar {
-                return Ok(Bar {
-                    symbol: symbol.to_string(),
-                    timestamp: std::time::SystemTime::now(),
-                    open: b.o,
-                    high: b.h,
-                    low: b.l,
-                    close: b.c,
-                    volume: b.v,
-                });
+            if let Some(bars_map) = api_resp.bars {
+                let mut result = HashMap::new();
+                for (symbol, b) in bars_map {
+                    result.insert(
+                        symbol.clone(),
+                        Bar {
+                            symbol,
+                            timestamp: std::time::SystemTime::now(),
+                            open: b.o,
+                            high: b.h,
+                            low: b.l,
+                            close: b.c,
+                            volume: b.v,
+                        },
+                    );
+                }
+                return Ok(result);
             }
         }
 
-        // Fallback: get most recent historical bar (market closed)
-        let bars = self.get_bars(symbol, "1Day", 1).await?;
-        bars.into_iter()
-            .next()
-            .ok_or_else(|| DataError::NotFound(format!("No bars for {}", symbol)))
+        // Fallback: get historical bars for all symbols
+        let mut result = HashMap::new();
+        for symbol in symbols {
+            if let Ok(bars) = self.get_bars(symbol, "1Day", 1).await
+                && let Some(bar) = bars.into_iter().next()
+            {
+                result.insert(symbol.clone(), bar);
+            }
+        }
+        Ok(result)
+    }
+
+    pub async fn get_latest_bar(&self, symbol: &str) -> Result<Bar, DataError> {
+        let symbols = vec![symbol.to_string()];
+        let mut result = self.get_latest_bars(&symbols).await?;
+        result
+            .remove(symbol)
+            .ok_or_else(|| DataError::NotFound(format!("No bar for {}", symbol)))
     }
 }
