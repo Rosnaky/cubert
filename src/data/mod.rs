@@ -45,6 +45,13 @@ struct ApiBarsResponse {
     symbol: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct ApiLatestBarResponse {
+    bar: Option<ApiBar>,
+    symbol: String,
+}
+
 pub struct MarketData {
     client: Client,
     data_endpoint: String,
@@ -75,9 +82,18 @@ impl MarketData {
         timeframe: &str,
         limit: u32,
     ) -> Result<Vec<Bar>, DataError> {
+        use chrono::{Duration, Utc};
+
+        let end = Utc::now();
+        let start = end - Duration::days(7);
+
         let url = format!(
-            "{}/v2/stocks/{}/bars?timeframe={}&limit={}",
-            self.data_endpoint, symbol, timeframe, limit
+            "{}/v2/stocks/{}/bars?timeframe={}&limit={}&start={}&feed=iex",
+            self.data_endpoint,
+            symbol,
+            timeframe,
+            limit,
+            start.format("%Y-%m-%dT%H:%M:%SZ")
         );
 
         let resp = self
@@ -118,7 +134,41 @@ impl MarketData {
     }
 
     pub async fn get_latest_bar(&self, symbol: &str) -> Result<Bar, DataError> {
-        let bars = self.get_bars(symbol, "1Min", 1).await?;
+        // Try real-time latest first
+        let url = format!(
+            "{}/v2/stocks/{}/bars/latest?feed=iex",
+            self.data_endpoint, symbol
+        );
+
+        let resp = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers())
+            .send()
+            .await
+            .map_err(|e| DataError::ConnectionFailed(e.to_string()))?;
+
+        if resp.status().is_success() {
+            let api_resp: ApiLatestBarResponse = resp
+                .json()
+                .await
+                .map_err(|e| DataError::ParseError(e.to_string()))?;
+
+            if let Some(b) = api_resp.bar {
+                return Ok(Bar {
+                    symbol: symbol.to_string(),
+                    timestamp: std::time::SystemTime::now(),
+                    open: b.o,
+                    high: b.h,
+                    low: b.l,
+                    close: b.c,
+                    volume: b.v,
+                });
+            }
+        }
+
+        // Fallback: get most recent historical bar (market closed)
+        let bars = self.get_bars(symbol, "1Day", 1).await?;
         bars.into_iter()
             .next()
             .ok_or_else(|| DataError::NotFound(format!("No bars for {}", symbol)))
