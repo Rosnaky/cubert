@@ -1,8 +1,9 @@
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    broker::{BrokerError, OrderId},
+    broker::{Broker, BrokerError, OrderId},
     types::{Account, Order, OrderType, Position, Side},
 };
 
@@ -155,7 +156,7 @@ impl AlpacaApiBroker {
             .collect())
     }
 
-    pub async fn submit_order(&self, order: &Order) -> Result<OrderId, BrokerError> {
+    pub async fn submit_order_internal(&self, order: &Order) -> Result<OrderId, BrokerError> {
         let req = AlpacaApiOrderRequest::from_order(order);
 
         let resp = self
@@ -195,5 +196,29 @@ impl AlpacaApiBroker {
         }
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Broker for AlpacaApiBroker {
+    async fn get_account(&self) -> Result<Account, BrokerError> {
+        self.fetch_account().await
+    }
+
+    async fn get_positions(&self) -> Result<Vec<Position>, BrokerError> {
+        self.fetch_positions().await
+    }
+
+    async fn get_position(&self, symbol: &str) -> Result<Option<Position>, BrokerError> {
+        let positions = self.fetch_positions().await?;
+        Ok(positions.into_iter().find(|p| p.symbol == symbol))
+    }
+
+    async fn submit_order(&self, order: &Order) -> Result<OrderId, BrokerError> {
+        self.submit_order_internal(order).await // Real broker handles price
+    }
+
+    async fn update_prices(&self, _symbols: &[String]) -> Result<(), BrokerError> {
+        Ok(()) // No-op for real broker - has real-time prices
     }
 }

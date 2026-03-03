@@ -1,7 +1,10 @@
+use async_trait::async_trait;
+
 use crate::types::{Account, Order, Position};
 
 pub mod alpaca;
 pub mod paper;
+pub mod paper_alpaca;
 
 pub type OrderId = String;
 
@@ -28,10 +31,11 @@ impl std::fmt::Display for BrokerError {
 
 impl std::error::Error for BrokerError {}
 
-pub trait Broker {
-    fn submit_order(&mut self, order: &Order) -> Result<OrderId, BrokerError>;
-    fn cancel_order(&mut self, order_id: &OrderId) -> Result<(), BrokerError>;
-    fn get_position(&self, symbol: &str) -> Option<Position>;
-    fn get_positions(&self) -> Vec<Position>;
-    fn get_account(&self) -> Account;
+#[async_trait]
+pub trait Broker: Send + Sync {
+    async fn get_account(&self) -> Result<Account, BrokerError>;
+    async fn get_positions(&self) -> Result<Vec<Position>, BrokerError>;
+    async fn get_position(&self, symbol: &str) -> Result<Option<Position>, BrokerError>;
+    async fn submit_order(&self, order: &Order) -> Result<OrderId, BrokerError>; // No current_price
+    async fn update_prices(&self, symbols: &[String]) -> Result<(), BrokerError>; // New
 }

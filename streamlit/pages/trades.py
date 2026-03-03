@@ -1,14 +1,14 @@
 import streamlit as st
 import sys
 sys.path.append('..')
-from utils.db import get_trades
+from utils.db import get_engine_trades
 import plotly.express as px
 import pandas as pd
 
 st.title("💼 Trades")
 
 # Get data
-trades_df = get_trades(limit=200)
+trades_df = get_engine_trades(limit=200)
 
 if not trades_df.empty:
     # Calculate P&L

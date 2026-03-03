@@ -6,7 +6,7 @@ use serde::Deserialize;
 pub struct Config {
     pub broker: BrokerConfig,
     pub data: DataConfig,
-    pub strategy: StrategyConfig,
+    pub strategies: Vec<StrategyConfig>,
     pub risk: RiskConfig,
     pub logging: LoggingConfig,
     pub storage: StorageConfig,
@@ -34,6 +34,14 @@ pub struct DataConfig {
 pub struct StrategyConfig {
     // Renamed from StrategyConfig
     pub name: String,
+    pub symbols: Vec<String>,
+    pub params: StrategyParamsConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct StrategyParamsConfig {
+    #[serde(rename = "type")]
+    pub kind: String,
     pub lookback_period: usize,
     pub threshold: f64,
     pub startup_lookback: String,
@@ -59,8 +67,8 @@ pub struct LoggingConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct StorageConfig {
-    #[serde(default)]
     pub db_url: String,
+    pub broker_db_url: String,
 }
 
 #[derive(Debug)]
@@ -108,9 +116,6 @@ impl Config {
 
         config.broker.api_secret = std::env::var("ALPACA_API_SECRET")
             .map_err(|_| ConfigError::MissingEnvVar("ALPACA_API_SECRET".to_string()))?;
-
-        config.storage.db_url = std::env::var("DATABASE_URL")
-            .map_err(|_| ConfigError::MissingEnvVar("DATABASE_URL".to_string()))?;
 
         Ok(config)
     }
