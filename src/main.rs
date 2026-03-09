@@ -8,7 +8,6 @@ use cubert::data::MarketData;
 use cubert::engine::Engine;
 use cubert::logging::Logger;
 use cubert::storage::Storage;
-use cubert::strategy::{StrategyParams, StrategySettings};
 
 #[tokio::main]
 async fn main() {
@@ -103,33 +102,11 @@ async fn main() {
         &config.broker.api_secret,
     );
 
-    let strategies: Vec<StrategySettings> = config
-        .strategies
-        .iter()
-        .map(|s| StrategySettings {
-            name: s.name.clone(),
-            symbols: s.symbols.clone(),
-            params: StrategyParams::Momentum {
-                lookback_period: s.params.lookback_period,
-                threshold: s.params.threshold,
-                startup_lookback: s.params.startup_lookback.clone(),
-                startup_bar_limit: s.params.startup_bar_limit,
-            },
-        })
-        .collect();
+    let mut engine = Engine::new(storage, broker, data, logger.clone(), config.risk.clone()).await;
 
-    let mut engine = Engine::new(
-        storage,
-        broker,
-        data,
-        logger.clone(),
-        config.risk.clone(),
-        strategies.clone(),
-    )
-    .await;
-
-    for strategy in strategies {
-        engine.add_strategy(strategy);
+    if let Err(e) = engine.load_all_accounts().await {
+        logger.error(&format!("Failed to load accounts: {}", e));
+        std::process::exit(1);
     }
 
     engine.run(60).await;

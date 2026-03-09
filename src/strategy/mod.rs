@@ -35,6 +35,9 @@ pub trait Strategy: Send + Sync {
     fn symbols(&self) -> &[String];
     fn on_bar(&mut self, bar: &Bar) -> Option<Signal>;
     fn reset(&mut self);
+    fn startup_config(&self) -> Option<(String, u32)> {
+        None
+    }
 }
 
 pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {
@@ -42,12 +45,15 @@ pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {
         StrategyParams::Momentum {
             lookback_period,
             threshold,
-            ..
+            startup_lookback,
+            startup_bar_limit,
         } => Box::new(momentum::MomentumStrategy::new(
             &config.name,
             config.symbols.clone(),
             *lookback_period,
             *threshold,
+            startup_lookback.clone(),
+            *startup_bar_limit,
         )),
         StrategyParams::MeanReversion {
             window: _,

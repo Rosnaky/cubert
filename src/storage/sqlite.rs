@@ -698,4 +698,15 @@ impl Storage {
 
         Ok(())
     }
+
+    pub async fn get_active_account_ids(&self) -> Result<Vec<String>, StorageError> {
+        let rows = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT account_id FROM account_strategies WHERE enabled = TRUE",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        Ok(rows)
+    }
 }
