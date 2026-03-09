@@ -3,7 +3,11 @@ use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 use uuid::Uuid;
 
 use super::models::{DbAccountSnapshot, DbPosition, DbSignal, DbTrade};
-use crate::types::{Account, Position};
+use crate::{
+    storage::{DbAccountStrategy, DbStrategy},
+    strategy::StrategyParams,
+    types::{Account, Position},
+};
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -117,6 +121,42 @@ impl Storage {
                 cash REAL NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+        "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        // Strategy
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS strategies (
+                id            TEXT PRIMARY KEY,
+                name          TEXT NOT NULL,
+                strategy_type TEXT NOT NULL,
+                params_json   TEXT NOT NULL,
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        // Strategy to Account mapping
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS account_strategies (
+                account_id   TEXT NOT NULL,
+                strategy_id  TEXT NOT NULL,
+                symbols_json TEXT NOT NULL DEFAULT '[]',
+                enabled      BOOLEAN DEFAULT TRUE,
+                assigned_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (account_id, strategy_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id),
+                FOREIGN KEY (strategy_id) REFERENCES strategies(id)
             )
         "#,
         )
@@ -462,5 +502,200 @@ impl Storage {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| StorageError::Query(e.to_string()))
+    }
+
+    // ============ Strategies ============
+    pub async fn insert_strategy(
+        &self,
+        name: &str,
+        params: &StrategyParams,
+    ) -> Result<String, StorageError> {
+        let id = Uuid::new_v4().to_string();
+        let timestamp = Utc::now().to_rfc3339();
+        let params_json =
+            serde_json::to_string(params).map_err(|e| StorageError::Query(e.to_string()))?;
+
+        let strategy_type = match params {
+            StrategyParams::Momentum { .. } => "momentum",
+            StrategyParams::MeanReversion { .. } => "mean_reversion",
+            _ => "custom",
+        };
+
+        sqlx::query(
+            r#"
+                INSERT INTO strategies (id, name, strategy_type, params_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            "#
+        )
+            .bind(&id)
+            .bind(name)
+            .bind(strategy_type)
+            .bind(params_json)
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        Ok(id)
+    }
+
+    pub async fn get_strategies(&self) -> Result<Vec<DbStrategy>, StorageError> {
+        let strategies: Vec<DbStrategy> = sqlx::query_as("SELECT * FROM strategies")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        Ok(strategies)
+    }
+
+    pub async fn get_strategy_by_id(&self, id: &str) -> Result<DbStrategy, StorageError> {
+        sqlx::query_as::<_, DbStrategy>("SELECT * FROM strategies WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))
+    }
+
+    pub async fn update_strategy(
+        &self,
+        id: &str,
+        name: &str,
+        strategy_type: &str,
+        params_json: &str,
+    ) -> Result<(), StorageError> {
+        let now = Utc::now().to_rfc3339();
+
+        let result = sqlx::query(
+            "UPDATE strategies SET name = ?, strategy_type = ?, params_json = ?, updated_at = ? WHERE id = ?"
+        )
+        .bind(name)
+        .bind(strategy_type)
+        .bind(params_json)
+        .bind(&now)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(StorageError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub async fn delete_strategy(&self, id: &str) -> Result<(), StorageError> {
+        // Remove all assignments first
+        sqlx::query("DELETE FROM account_strategies WHERE strategy_id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        sqlx::query("DELETE FROM strategies WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        Ok(())
+    }
+
+    // ============ Account Strategies ============
+    pub async fn assign_strategy_to_account(
+        &self,
+        account_id: &str,
+        strategy_id: &str,
+        symbols: &[String],
+    ) -> Result<(), StorageError> {
+        let symbols_json = serde_json::to_string(symbols).unwrap_or_default();
+
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO account_strategies (account_id, strategy_id, symbols, enabled)
+            VALUES (?, ?, ?, TRUE)
+        "#,
+        )
+        .bind(account_id)
+        .bind(strategy_id)
+        .bind(&symbols_json)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub async fn unassign_strategy_from_account(
+        &self,
+        account_id: &str,
+        strategy_id: &str,
+    ) -> Result<(), StorageError> {
+        sqlx::query("DELETE FROM account_strategies WHERE account_id = ? AND strategy_id = ?")
+            .bind(account_id)
+            .bind(strategy_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub async fn get_strategies_for_account(
+        &self,
+        account_id: &str,
+    ) -> Result<Vec<(DbStrategy, DbAccountStrategy)>, StorageError> {
+        let assignments = sqlx::query_as::<_, DbAccountStrategy>(
+            "SELECT * FROM account_strategies WHERE account_id = ? AND enabled = TRUE",
+        )
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        let mut results = Vec::new();
+        for assignment in assignments {
+            let strategy = sqlx::query_as::<_, DbStrategy>("SELECT * FROM strategies WHERE id = ?")
+                .bind(&assignment.strategy_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| StorageError::Query(e.to_string()))?;
+
+            results.push((strategy, assignment));
+        }
+
+        Ok(results)
+    }
+
+    pub async fn get_accounts_for_strategy(
+        &self,
+        strategy_id: &str,
+    ) -> Result<Vec<DbAccountStrategy>, StorageError> {
+        sqlx::query_as::<_, DbAccountStrategy>(
+            "SELECT * FROM account_strategies WHERE strategy_id = ? AND enabled = TRUE",
+        )
+        .bind(strategy_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StorageError::Query(e.to_string()))
+    }
+
+    pub async fn toggle_strategy_enabled(
+        &self,
+        account_id: &str,
+        strategy_id: &str,
+        enabled: bool,
+    ) -> Result<(), StorageError> {
+        sqlx::query(
+            "UPDATE account_strategies SET enabled = ? WHERE account_id = ? AND strategy_id = ?",
+        )
+        .bind(enabled)
+        .bind(account_id)
+        .bind(strategy_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StorageError::Query(e.to_string()))?;
+
+        Ok(())
     }
 }

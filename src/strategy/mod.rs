@@ -2,6 +2,7 @@ pub mod momentum;
 
 use crate::types::{Bar, Signal};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct StrategySettings {
@@ -10,7 +11,8 @@ pub struct StrategySettings {
     pub params: StrategyParams,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum StrategyParams {
     Momentum {
         lookback_period: usize,
