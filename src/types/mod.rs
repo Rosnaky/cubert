@@ -76,6 +76,7 @@ impl Position {
 
 #[derive(Debug, Clone)]
 pub struct Account {
+    pub id: String,
     pub equity: f64,
     pub cash: f64,
     pub buying_power: f64,

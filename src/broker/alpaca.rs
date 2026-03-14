@@ -15,8 +15,9 @@ struct AlpacaApiAccount {
 }
 
 impl AlpacaApiAccount {
-    fn into_account(self) -> Account {
+    fn into_account(self, id: &str) -> Account {
         Account {
+            id: id.to_string(),
             equity: self.equity.parse().unwrap_or(0.0),
             cash: self.cash.parse().unwrap_or(0.0),
             buying_power: self.buying_power.parse().unwrap_or(0.0),
@@ -88,6 +89,7 @@ impl AlpacaApiOrderRequest {
 }
 
 pub struct AlpacaApiBroker {
+    account_id: String,
     client: Client,
     base_url: String,
     api_key: String,
@@ -95,8 +97,15 @@ pub struct AlpacaApiBroker {
 }
 
 impl AlpacaApiBroker {
-    pub fn new(api_endpoint: &str, api_key: &str, api_secret: &str, _paper: bool) -> Self {
+    pub fn new(
+        account_id: &str,
+        api_endpoint: &str,
+        api_key: &str,
+        api_secret: &str,
+        _paper: bool,
+    ) -> Self {
         Self {
+            account_id: account_id.to_string(),
             client: Client::new(),
             base_url: { api_endpoint }.to_string(),
             api_key: api_key.to_string(),
@@ -129,7 +138,7 @@ impl AlpacaApiBroker {
             .await
             .map_err(|e| BrokerError::Fail(e.to_string()))?;
 
-        Ok(api_account.into_account())
+        Ok(api_account.into_account(&self.account_id))
     }
 
     pub async fn fetch_positions(&self) -> Result<Vec<Position>, BrokerError> {

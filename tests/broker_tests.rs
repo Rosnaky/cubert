@@ -4,7 +4,7 @@ use cubert::types::{Order, OrderType, Side};
 
 #[tokio::test]
 async fn test_paper_broker_buy_order() {
-    let broker = PaperBroker::new(100_000.0);
+    let broker = PaperBroker::new("test_buy", 100_000.0);
     broker.set_price("AAPL", 150.0);
 
     let order = Order {
@@ -18,7 +18,7 @@ async fn test_paper_broker_buy_order() {
     assert!(order_id.starts_with("PAPER-"));
 
     let account = broker.get_account().await.unwrap();
-    assert_eq!(account.cash, 85_000.0); // 100k - (100 * 150)
+    assert_eq!(account.cash, 85_000.0);
     assert_eq!(account.equity, 100_000.0);
 
     let position = broker.get_position("AAPL").await.unwrap().unwrap();
@@ -28,10 +28,9 @@ async fn test_paper_broker_buy_order() {
 
 #[tokio::test]
 async fn test_paper_broker_sell_order() {
-    let broker = PaperBroker::new(100_000.0);
+    let broker = PaperBroker::new("test_sell", 100_000.0);
     broker.set_price("AAPL", 150.0);
 
-    // First buy
     let buy_order = Order {
         symbol: "AAPL".to_string(),
         side: Side::Buy,
@@ -40,7 +39,6 @@ async fn test_paper_broker_sell_order() {
     };
     broker.submit_order(&buy_order).await.unwrap();
 
-    // Update price and sell
     broker.set_price("AAPL", 160.0);
 
     let sell_order = Order {
@@ -52,7 +50,7 @@ async fn test_paper_broker_sell_order() {
     broker.submit_order(&sell_order).await.unwrap();
 
     let account = broker.get_account().await.unwrap();
-    assert_eq!(account.cash, 101_000.0); // 85k + (100 * 160)
+    assert_eq!(account.cash, 101_000.0);
     assert_eq!(account.equity, 101_000.0);
 
     let position = broker.get_position("AAPL").await.unwrap();
@@ -61,13 +59,13 @@ async fn test_paper_broker_sell_order() {
 
 #[tokio::test]
 async fn test_paper_broker_insufficient_funds() {
-    let broker = PaperBroker::new(1_000.0);
+    let broker = PaperBroker::new("test_funds", 1_000.0);
     broker.set_price("AAPL", 150.0);
 
     let order = Order {
         symbol: "AAPL".to_string(),
         side: Side::Buy,
-        quantity: 100.0, // Would cost $15k
+        quantity: 100.0,
         order_type: OrderType::Market,
     };
 
@@ -77,10 +75,9 @@ async fn test_paper_broker_insufficient_funds() {
 
 #[tokio::test]
 async fn test_paper_broker_insufficient_shares() {
-    let broker = PaperBroker::new(100_000.0);
+    let broker = PaperBroker::new("test_shares", 100_000.0);
     broker.set_price("AAPL", 150.0);
 
-    // Buy 50 shares
     let buy_order = Order {
         symbol: "AAPL".to_string(),
         side: Side::Buy,
@@ -89,7 +86,6 @@ async fn test_paper_broker_insufficient_shares() {
     };
     broker.submit_order(&buy_order).await.unwrap();
 
-    // Try to sell 100
     let sell_order = Order {
         symbol: "AAPL".to_string(),
         side: Side::Sell,
@@ -103,9 +99,8 @@ async fn test_paper_broker_insufficient_shares() {
 
 #[tokio::test]
 async fn test_paper_broker_position_averaging() {
-    let broker = PaperBroker::new(100_000.0);
+    let broker = PaperBroker::new("test_avg", 100_000.0);
 
-    // Buy 100 @ $100
     broker.set_price("AAPL", 100.0);
     let order1 = Order {
         symbol: "AAPL".to_string(),
@@ -115,7 +110,6 @@ async fn test_paper_broker_position_averaging() {
     };
     broker.submit_order(&order1).await.unwrap();
 
-    // Buy 100 @ $120
     broker.set_price("AAPL", 120.0);
     let order2 = Order {
         symbol: "AAPL".to_string(),
@@ -127,12 +121,12 @@ async fn test_paper_broker_position_averaging() {
 
     let position = broker.get_position("AAPL").await.unwrap().unwrap();
     assert_eq!(position.quantity, 200.0);
-    assert_eq!(position.avg_entry_price, 110.0); // ($10k + $12k) / 200
+    assert_eq!(position.avg_entry_price, 110.0);
 }
 
 #[tokio::test]
 async fn test_paper_broker_update_prices() {
-    let broker = PaperBroker::new(100_000.0);
+    let broker = PaperBroker::new("test_prices", 100_000.0);
     broker.set_price("AAPL", 150.0);
 
     let order = Order {
@@ -143,12 +137,11 @@ async fn test_paper_broker_update_prices() {
     };
     broker.submit_order(&order).await.unwrap();
 
-    // Update prices
     broker.set_price("AAPL", 200.0);
     broker.update_prices(&["AAPL".to_string()]).await.unwrap();
 
     let account = broker.get_account().await.unwrap();
-    assert_eq!(account.equity, 105_000.0); // 85k cash + 100 * 200
+    assert_eq!(account.equity, 105_000.0);
 
     let position = broker.get_position("AAPL").await.unwrap().unwrap();
     assert_eq!(position.current_price, 200.0);
@@ -156,7 +149,7 @@ async fn test_paper_broker_update_prices() {
 
 #[tokio::test]
 async fn test_paper_broker_multiple_positions() {
-    let broker = PaperBroker::new(100_000.0);
+    let broker = PaperBroker::new("test_multi", 100_000.0);
 
     broker.set_price("AAPL", 150.0);
     broker.set_price("MSFT", 300.0);
@@ -181,16 +174,15 @@ async fn test_paper_broker_multiple_positions() {
     assert_eq!(positions.len(), 2);
 
     let account = broker.get_account().await.unwrap();
-    assert_eq!(account.cash, 70_000.0); // 100k - 15k - 15k
+    assert_eq!(account.cash, 70_000.0);
     assert_eq!(account.equity, 100_000.0);
 }
 
 #[tokio::test]
 async fn test_paper_broker_partial_sell() {
-    let broker = PaperBroker::new(100_000.0);
+    let broker = PaperBroker::new("test_partial", 100_000.0);
     broker.set_price("AAPL", 100.0);
 
-    // Buy 100 shares
     let buy_order = Order {
         symbol: "AAPL".to_string(),
         side: Side::Buy,
@@ -199,7 +191,6 @@ async fn test_paper_broker_partial_sell() {
     };
     broker.submit_order(&buy_order).await.unwrap();
 
-    // Sell 40 shares
     let sell_order = Order {
         symbol: "AAPL".to_string(),
         side: Side::Sell,
@@ -212,13 +203,12 @@ async fn test_paper_broker_partial_sell() {
     assert_eq!(position.quantity, 60.0);
 
     let account = broker.get_account().await.unwrap();
-    assert_eq!(account.cash, 94_000.0); // 90k + 4k
+    assert_eq!(account.cash, 94_000.0);
 }
 
 #[tokio::test]
 async fn test_paper_broker_limit_order() {
-    let broker = PaperBroker::new(100_000.0);
-    // Don't set market price - limit order uses its own price
+    let broker = PaperBroker::new("test_limit", 100_000.0);
 
     let order = Order {
         symbol: "AAPL".to_string(),
@@ -230,7 +220,7 @@ async fn test_paper_broker_limit_order() {
     broker.submit_order(&order).await.unwrap();
 
     let account = broker.get_account().await.unwrap();
-    assert_eq!(account.cash, 85_500.0); // 100k - (100 * 145)
+    assert_eq!(account.cash, 85_500.0);
 
     let position = broker.get_position("AAPL").await.unwrap().unwrap();
     assert_eq!(position.avg_entry_price, 145.0);

@@ -15,9 +15,10 @@ pub struct PaperBroker {
 }
 
 impl PaperBroker {
-    pub fn new(starting_cash: f64) -> Self {
+    pub fn new(id: &str, starting_cash: f64) -> Self {
         Self {
             account: Mutex::new(Account {
+                id: id.to_string(),
                 equity: starting_cash,
                 cash: starting_cash,
                 buying_power: starting_cash,
