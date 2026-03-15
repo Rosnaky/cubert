@@ -38,6 +38,7 @@ pub trait Strategy: Send + Sync {
     fn startup_config(&self) -> Option<(String, u32)> {
         None
     }
+    fn params(&self) -> StrategyParams;
 }
 
 pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {

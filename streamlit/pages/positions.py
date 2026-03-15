@@ -1,12 +1,19 @@
 import streamlit as st
 import sys
 sys.path.append('..')
-from utils.db import get_positions
+from utils.db import get_positions, get_active_account_ids
 import plotly.graph_objects as go
 
-st.title("📈 Current Positions")
+st.title("Positions")
 
-positions_df = get_positions()
+account_ids = get_active_account_ids()
+
+if not account_ids:
+    st.info("No active accounts")
+    st.stop()
+
+account_id = st.selectbox("Account", account_ids)
+positions_df = get_positions(account_id)
 
 if not positions_df.empty:
     # Calculate metrics

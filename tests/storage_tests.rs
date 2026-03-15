@@ -102,7 +102,7 @@ async fn test_trade_insert_and_query() {
             100.0,
             150.0,
             Some("order-1"),
-            Some("momentum"),
+            Some("Momentum"),
         )
         .await
         .unwrap();
@@ -114,7 +114,7 @@ async fn test_trade_insert_and_query() {
             50.0,
             300.0,
             Some("order-2"),
-            Some("momentum"),
+            Some("Momentum"),
         )
         .await
         .unwrap();
@@ -126,7 +126,7 @@ async fn test_trade_insert_and_query() {
             100.0,
             160.0,
             Some("order-3"),
-            Some("momentum"),
+            Some("Momentum"),
         )
         .await
         .unwrap();
@@ -149,11 +149,11 @@ async fn test_signal_insert_and_query() {
     let storage = setup_test_storage().await;
 
     storage
-        .insert_signal("acct_signals", "AAPL", "buy", 0.8, "momentum")
+        .insert_signal("acct_signals", "AAPL", "buy", 0.8, "Momentum")
         .await
         .unwrap();
     storage
-        .insert_signal("acct_signals", "MSFT", "sell", 0.6, "mean_reversion")
+        .insert_signal("acct_signals", "MSFT", "sell", 0.6, "MeanReversion")
         .await
         .unwrap();
 
@@ -203,13 +203,13 @@ async fn test_strategy_crud() {
 
     let strat = storage.get_strategy_by_id(&id).await.unwrap();
     assert_eq!(strat.name, "fast_momentum");
-    assert_eq!(strat.strategy_type, "momentum");
+    assert_eq!(strat.strategy_type, "Momentum");
 
     let all = storage.get_strategies().await.unwrap();
     assert_eq!(all.len(), 1);
 
     storage
-        .update_strategy(&id, "slow_momentum", "momentum", &strat.params_json)
+        .update_strategy(&id, "slow_momentum", "Momentum", &strat.params_json)
         .await
         .unwrap();
 

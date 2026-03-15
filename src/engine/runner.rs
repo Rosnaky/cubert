@@ -62,6 +62,82 @@ impl Engine {
         }
     }
 
+    async fn reload_from_db(&mut self) {
+        for (account_id, runner) in &mut self.accounts {
+            let assignments = match self
+                .state
+                .storage
+                .get_strategies_for_account(account_id)
+                .await
+            {
+                Ok(a) => a,
+                Err(e) => {
+                    self.state
+                        .logger
+                        .error(&format!("[{}] Failed to reload: {}", account_id, e));
+                    continue;
+                }
+            };
+
+            let db_fingerprint: Vec<(String, String, String)> = assignments
+                .iter()
+                .map(|(s, a)| {
+                    (
+                        s.name.clone(),
+                        a.symbols_json.clone(),
+                        s.params_json.clone(),
+                    )
+                })
+                .collect();
+
+            let current_fingerprint: Vec<(String, String, String)> = runner
+                .strategies
+                .iter()
+                .map(|s| {
+                    let symbols = serde_json::to_string(s.symbols()).unwrap_or_default();
+                    let params = serde_json::to_string(&s.params()).unwrap_or_default();
+                    (s.name().to_string(), symbols, params)
+                })
+                .collect();
+
+            if db_fingerprint == current_fingerprint {
+                continue;
+            }
+
+            self.state
+                .logger
+                .info(&format!("[{}] Strategies changed, reloading", account_id));
+
+            let mut new_strategies: Vec<Box<dyn Strategy>> = Vec::new();
+
+            for (db_strat, assignment) in assignments {
+                let params = match db_strat.params() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.state.logger.error(&format!(
+                            "[{}] Bad params for '{}': {}",
+                            account_id, db_strat.name, e
+                        ));
+                        continue;
+                    }
+                };
+
+                let symbols: Vec<String> =
+                    serde_json::from_str(&assignment.symbols_json).unwrap_or_default();
+
+                let settings = StrategySettings {
+                    name: db_strat.name.clone(),
+                    symbols,
+                    params,
+                };
+
+                new_strategies.push(create_strategy(&settings));
+            }
+
+            runner.strategies = new_strategies;
+        }
+    }
+
     pub async fn load_strategies(
         &mut self,
         account_id: &str,
@@ -141,6 +217,8 @@ impl Engine {
 
         loop {
             self.state.logger.info("=== Tick starting ===");
+
+            self.reload_from_db().await;
 
             let all_symbols = self.all_symbols();
 
@@ -222,6 +300,31 @@ impl Engine {
                         self.state
                             .logger
                             .error(&format!("[{}] Failed to fetch account: {}", account_id, e));
+                    }
+                }
+            }
+
+            for (account_id, runner) in &self.accounts {
+                match runner.broker.get_positions().await {
+                    Ok(positions) => {
+                        for pos in &positions {
+                            let _ = self
+                                .state
+                                .storage
+                                .upsert_position(
+                                    account_id,
+                                    &pos.symbol,
+                                    pos.quantity,
+                                    pos.avg_entry_price,
+                                    pos.current_price,
+                                )
+                                .await;
+                        }
+                    }
+                    Err(e) => {
+                        self.state
+                            .logger
+                            .error(&format!("[{}] Failed to sync positions: {}", account_id, e));
                     }
                 }
             }

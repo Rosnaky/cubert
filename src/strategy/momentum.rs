@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::strategy::Bar;
 use crate::strategy::Strategy;
+use crate::strategy::StrategyParams;
 use crate::types::Signal;
 
 pub struct MomentumStrategy {
@@ -91,5 +92,14 @@ impl Strategy for MomentumStrategy {
 
     fn startup_config(&self) -> Option<(String, u32)> {
         Some((self.startup_lookback.clone(), self.startup_bar_limit))
+    }
+
+    fn params(&self) -> StrategyParams {
+        StrategyParams::Momentum {
+            lookback_period: self.lookback_period,
+            threshold: self.threshold,
+            startup_lookback: self.startup_lookback.clone(),
+            startup_bar_limit: self.startup_bar_limit,
+        }
     }
 }

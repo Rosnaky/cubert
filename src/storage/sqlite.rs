@@ -585,9 +585,9 @@ impl Storage {
             serde_json::to_string(params).map_err(|e| StorageError::Query(e.to_string()))?;
 
         let strategy_type = match params {
-            StrategyParams::Momentum { .. } => "momentum",
-            StrategyParams::MeanReversion { .. } => "mean_reversion",
-            _ => "custom",
+            StrategyParams::Momentum { .. } => "Momentum",
+            StrategyParams::MeanReversion { .. } => "MeanReversion",
+            _ => "Custom",
         };
 
         sqlx::query(
