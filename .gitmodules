@@ -1,0 +1,3 @@
+[submodule "dependencies/gem-blockset"]
+	path = dependencies/gem-blockset
+	url = https://github.com/Rosnaky/gem-blockset.git
