@@ -113,5 +113,5 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: cubert
+          name: cubert-binary
           path: target/release/cubert
