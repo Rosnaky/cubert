@@ -27,7 +27,7 @@ jobs:
       - name: Set up CUDA
         uses: Jimver/cuda-toolkit@v0.2.23
         with:
-          cuda: '12.2.0'
+          cuda: '12.8.0'
           log-file-suffix: '-${{ github.job }}'
 
       - name: Cache cargo
@@ -61,7 +61,7 @@ jobs:
       - name: Set up CUDA
         uses: Jimver/cuda-toolkit@v0.2.23
         with:
-          cuda: '12.2.0'
+          cuda: '12.8.0'
           log-file-suffix: '-${{ github.job }}'
 
       - name: Cache cargo
@@ -93,7 +93,7 @@ jobs:
       - name: Set up CUDA
         uses: Jimver/cuda-toolkit@v0.2.23
         with:
-          cuda: '12.2.0'
+          cuda: '12.8.0'
           log-file-suffix: '-${{ github.job }}'
 
       - name: Cache cargo
