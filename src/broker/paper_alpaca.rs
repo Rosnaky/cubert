@@ -7,13 +7,18 @@ use crate::{
 use async_trait::async_trait;
 
 pub struct PaperAlpacaBroker {
+    account_id: String,
     storage: Storage,
     data: MarketData,
 }
 
 impl PaperAlpacaBroker {
-    pub fn new(storage: Storage, data: MarketData) -> Self {
-        Self { storage, data }
+    pub fn new(account_id: &str, storage: Storage, data: MarketData) -> Self {
+        Self {
+            account_id: account_id.to_string(),
+            storage,
+            data,
+        }
     }
 }
 
@@ -21,27 +26,26 @@ impl PaperAlpacaBroker {
 impl Broker for PaperAlpacaBroker {
     async fn get_account(&self) -> Result<Account, BrokerError> {
         self.storage
-            .get_account()
+            .get_account(&self.account_id)
             .await
             .map_err(|e| BrokerError::Fail(e.to_string()))
     }
 
     async fn get_positions(&self) -> Result<Vec<Position>, BrokerError> {
         self.storage
-            .get_positions()
+            .get_positions(&self.account_id)
             .await
             .map_err(|e| BrokerError::Fail(e.to_string()))
     }
 
     async fn get_position(&self, symbol: &str) -> Result<Option<Position>, BrokerError> {
         self.storage
-            .get_position(symbol)
+            .get_position(&self.account_id, symbol)
             .await
             .map_err(|e| BrokerError::Fail(e.to_string()))
     }
 
     async fn submit_order(&self, order: &Order) -> Result<OrderId, BrokerError> {
-        // Fetch current price
         let bar = self
             .data
             .get_latest_bar(&order.symbol)
@@ -55,13 +59,13 @@ impl Broker for PaperAlpacaBroker {
         match order.side {
             Side::Buy => {
                 self.storage
-                    .deduct_cash(order_value)
+                    .deduct_cash(&self.account_id, order_value)
                     .await
                     .map_err(|_| BrokerError::InsufficientFunds)?;
 
                 let existing = self
                     .storage
-                    .get_position(&order.symbol)
+                    .get_position(&self.account_id, &order.symbol)
                     .await
                     .map_err(|e| BrokerError::Fail(e.to_string()))?;
 
@@ -70,12 +74,19 @@ impl Broker for PaperAlpacaBroker {
                     let total_cost = (pos.quantity * pos.avg_entry_price) + order_value;
                     let new_avg = total_cost / total_qty;
                     self.storage
-                        .upsert_position(&order.symbol, total_qty, new_avg, current_price)
+                        .upsert_position(
+                            &self.account_id,
+                            &order.symbol,
+                            total_qty,
+                            new_avg,
+                            current_price,
+                        )
                         .await
                         .map_err(|e| BrokerError::Fail(e.to_string()))?;
                 } else {
                     self.storage
                         .upsert_position(
+                            &self.account_id,
                             &order.symbol,
                             order.quantity,
                             current_price,
@@ -88,7 +99,7 @@ impl Broker for PaperAlpacaBroker {
             Side::Sell => {
                 let existing = self
                     .storage
-                    .get_position(&order.symbol)
+                    .get_position(&self.account_id, &order.symbol)
                     .await
                     .map_err(|e| BrokerError::Fail(e.to_string()))?
                     .ok_or_else(|| BrokerError::InvalidOrder("No position".to_string()))?;
@@ -98,19 +109,20 @@ impl Broker for PaperAlpacaBroker {
                 }
 
                 self.storage
-                    .add_cash(order_value)
+                    .add_cash(&self.account_id, order_value)
                     .await
                     .map_err(|e| BrokerError::Fail(e.to_string()))?;
 
                 let new_qty = existing.quantity - order.quantity;
                 if new_qty <= 0.0 {
                     self.storage
-                        .delete_position(&order.symbol)
+                        .delete_position(&self.account_id, &order.symbol)
                         .await
                         .map_err(|e| BrokerError::Fail(e.to_string()))?;
                 } else {
                     self.storage
                         .upsert_position(
+                            &self.account_id,
                             &order.symbol,
                             new_qty,
                             existing.avg_entry_price,
@@ -128,12 +140,13 @@ impl Broker for PaperAlpacaBroker {
         };
         self.storage
             .insert_trade(
+                &self.account_id,
                 &order.symbol,
                 side_str,
                 order.quantity,
                 current_price,
                 Some(&order_id),
-                None, // No strategy name in broker - that's engine's concern
+                None,
             )
             .await
             .map_err(|e| BrokerError::Fail(e.to_string()))?;
@@ -150,21 +163,10 @@ impl Broker for PaperAlpacaBroker {
 
         for (symbol, bar) in &bars {
             self.storage
-                .update_position_price(symbol, bar.close)
+                .update_position_price(&self.account_id, symbol, bar.close)
                 .await
                 .map_err(|e| BrokerError::Fail(e.to_string()))?;
         }
-
-        let account = self
-            .storage
-            .get_account()
-            .await
-            .map_err(|e| BrokerError::Fail(e.to_string()))?;
-
-        self.storage
-            .insert_account_snapshot(account.equity, account.cash, account.buying_power)
-            .await
-            .map_err(|e| BrokerError::Fail(e.to_string()))?;
 
         Ok(())
     }

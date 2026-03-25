@@ -6,7 +6,6 @@ use serde::Deserialize;
 pub struct Config {
     pub broker: BrokerConfig,
     pub data: DataConfig,
-    pub strategies: Vec<StrategyConfig>,
     pub risk: RiskConfig,
     pub logging: LoggingConfig,
     pub storage: StorageConfig,

@@ -8,7 +8,6 @@ use cubert::data::MarketData;
 use cubert::engine::Engine;
 use cubert::logging::Logger;
 use cubert::storage::Storage;
-use cubert::strategy::{StrategyParams, StrategySettings};
 
 #[tokio::main]
 async fn main() {
@@ -26,7 +25,6 @@ async fn main() {
 
     logger.info("=== Cubert Starting ===");
 
-    // Engine storage (for logging signals, snapshots, etc.)
     let storage = match Storage::connect(&config.storage.db_url).await {
         Ok(s) => s,
         Err(e) => {
@@ -40,96 +38,78 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // Create broker based on config
-    let broker: Arc<dyn Broker> = if config.broker.paper {
-        logger.info("Using paper broker (simulated)");
-
-        // Broker storage (simulates broker API)
-        let broker_storage = match Storage::connect(&config.storage.broker_db_url).await {
-            Ok(s) => s,
-            Err(e) => {
-                logger.error(&format!("Broker database error: {}", e));
-                std::process::exit(1);
-            }
-        };
-
-        if let Err(e) = broker_storage.migrate().await {
-            logger.error(&format!("Broker migration failed: {}", e));
-            std::process::exit(1);
-        }
-
-        let starting_cash = 100_000.0;
-        if let Err(e) = broker_storage.init_account(starting_cash).await {
-            logger.error(&format!("Failed to init account: {}", e));
-            std::process::exit(1);
-        }
-
-        let data = MarketData::new(
-            &config.broker.data_endpoint,
-            &config.broker.api_key,
-            &config.broker.api_secret,
-        );
-
-        Arc::new(PaperAlpacaBroker::new(broker_storage, data))
-    } else {
-        logger.info("Using Alpaca live broker");
-
-        Arc::new(AlpacaApiBroker::new(
-            &config.broker.api_endpoint,
-            &config.broker.api_key,
-            &config.broker.api_secret,
-            false,
-        ))
-    };
-
-    // Verify account
-    match broker.get_account().await {
-        Ok(account) => {
-            logger.info(&format!(
-                "Account: ${:.2} cash, ${:.2} equity",
-                account.cash, account.equity
-            ));
-        }
-        Err(e) => {
-            logger.error(&format!("Account error: {}", e));
-            std::process::exit(1);
-        }
-    }
-
-    // Market data
     let data = MarketData::new(
         &config.broker.data_endpoint,
         &config.broker.api_key,
         &config.broker.api_secret,
     );
 
-    let strategies: Vec<StrategySettings> = config
-        .strategies
-        .iter()
-        .map(|s| StrategySettings {
-            name: s.name.clone(),
-            symbols: s.symbols.clone(),
-            params: StrategyParams::Momentum {
-                lookback_period: s.params.lookback_period,
-                threshold: s.params.threshold,
-                startup_lookback: s.params.startup_lookback.clone(),
-                startup_bar_limit: s.params.startup_bar_limit,
-            },
-        })
-        .collect();
+    let account_ids = match storage.get_active_account_ids().await {
+        Ok(ids) => ids,
+        Err(e) => {
+            logger.error(&format!("Failed to load accounts: {}", e));
+            std::process::exit(1);
+        }
+    };
 
-    let mut engine = Engine::new(
-        storage,
-        broker,
-        data,
-        logger.clone(),
-        config.risk.clone(),
-        strategies.clone(),
-    )
-    .await;
+    logger.info(&format!("Found {} active accounts", account_ids.len()));
+    let mut engine = Engine::new(storage, data.clone(), logger.clone(), config.risk.clone()).await;
 
-    for strategy in strategies {
-        engine.add_strategy(strategy);
+    for account_id in &account_ids {
+        let broker: Arc<dyn Broker> = if config.broker.paper {
+            let broker_db_url = format!("sqlite:broker_{}.db", account_id);
+            let broker_storage = match Storage::connect(&broker_db_url).await {
+                Ok(s) => s,
+                Err(e) => {
+                    logger.error(&format!("[{}] Broker DB error: {}", account_id, e));
+                    continue;
+                }
+            };
+
+            if let Err(e) = broker_storage.migrate().await {
+                logger.error(&format!("[{}] Broker migration failed: {}", account_id, e));
+                continue;
+            }
+
+            if let Err(e) = broker_storage.init_account(account_id, 100_000.0).await {
+                logger.error(&format!("[{}] Failed to init account: {}", account_id, e));
+                continue;
+            }
+
+            Arc::new(PaperAlpacaBroker::new(
+                account_id,
+                broker_storage,
+                data.clone(),
+            ))
+        } else {
+            Arc::new(AlpacaApiBroker::new(
+                account_id,
+                &config.broker.api_endpoint,
+                &config.broker.api_key,
+                &config.broker.api_secret,
+                false,
+            ))
+        };
+
+        match broker.get_account().await {
+            Ok(account) => {
+                logger.info(&format!(
+                    "[{}] Account: ${:.2} cash, ${:.2} equity",
+                    account_id, account.cash, account.equity
+                ));
+            }
+            Err(e) => {
+                logger.error(&format!("[{}] Account error: {}", account_id, e));
+                continue;
+            }
+        }
+
+        if let Err(e) = engine.load_strategies(account_id, broker).await {
+            logger.error(&format!(
+                "[{}] Failed to load strategies: {}",
+                account_id, e
+            ));
+        }
     }
 
     engine.run(60).await;

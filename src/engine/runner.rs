@@ -9,7 +9,7 @@ use crate::{
     logging::Logger,
     risk::RiskManager,
     storage::Storage,
-    strategy::{Strategy, StrategyParams, StrategySettings, create_strategy},
+    strategy::{Strategy, StrategySettings, create_strategy},
     types::{Side, Signal},
 };
 
@@ -19,81 +19,198 @@ pub struct SignalMessage {
     pub signal: Signal,
 }
 
-/// Shared data accessible by any component
 pub struct SharedState {
     pub storage: Storage,
-    pub broker: Arc<dyn Broker>,
     pub data: MarketData,
     pub logger: Arc<Logger>,
 }
 
-/// Main trading engine
+pub struct AccountRunner {
+    pub broker: Arc<dyn Broker>,
+    pub strategies: Vec<Box<dyn Strategy>>,
+}
+
 pub struct Engine {
     state: Arc<SharedState>,
-    strategies: Vec<Box<dyn Strategy>>,
+    accounts: HashMap<String, AccountRunner>,
     risk_manager: RiskManager,
     _signal_tx: mpsc::Sender<SignalMessage>,
     _signal_rx: mpsc::Receiver<SignalMessage>,
-    strategy_configs: Vec<StrategySettings>,
 }
 
 impl Engine {
     pub async fn new(
         storage: Storage,
-        broker: Arc<dyn Broker>,
         data: MarketData,
         logger: Arc<Logger>,
         risk_config: RiskConfig,
-        strategy_configs: Vec<StrategySettings>,
     ) -> Self {
         let (signal_tx, signal_rx) = mpsc::channel(100);
 
         let state = Arc::new(SharedState {
             storage,
-            broker,
             data,
             logger,
         });
 
         Self {
             state,
-            strategies: Vec::new(),
+            accounts: HashMap::new(),
             risk_manager: RiskManager::new(risk_config),
             _signal_tx: signal_tx,
             _signal_rx: signal_rx,
-            strategy_configs,
         }
     }
 
-    /// Register a strategy
-    pub fn add_strategy(&mut self, config: StrategySettings) {
-        let strategy = create_strategy(&config);
-        self.state.logger.info(&format!(
-            "Registered strategy: {} for {:?}",
-            strategy.name(),
-            strategy.symbols()
-        ));
-        self.strategies.push(strategy);
+    async fn reload_from_db(&mut self) {
+        for (account_id, runner) in &mut self.accounts {
+            let assignments = match self
+                .state
+                .storage
+                .get_strategies_for_account(account_id)
+                .await
+            {
+                Ok(a) => a,
+                Err(e) => {
+                    self.state
+                        .logger
+                        .error(&format!("[{}] Failed to reload: {}", account_id, e));
+                    continue;
+                }
+            };
+
+            let db_fingerprint: Vec<(String, String, String)> = assignments
+                .iter()
+                .map(|(s, a)| {
+                    (
+                        s.name.clone(),
+                        a.symbols_json.clone(),
+                        s.params_json.clone(),
+                    )
+                })
+                .collect();
+
+            let current_fingerprint: Vec<(String, String, String)> = runner
+                .strategies
+                .iter()
+                .map(|s| {
+                    let symbols = serde_json::to_string(s.symbols()).unwrap_or_default();
+                    let params = serde_json::to_string(&s.params()).unwrap_or_default();
+                    (s.name().to_string(), symbols, params)
+                })
+                .collect();
+
+            if db_fingerprint == current_fingerprint {
+                continue;
+            }
+
+            self.state
+                .logger
+                .info(&format!("[{}] Strategies changed, reloading", account_id));
+
+            let mut new_strategies: Vec<Box<dyn Strategy>> = Vec::new();
+
+            for (db_strat, assignment) in assignments {
+                let params = match db_strat.params() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.state.logger.error(&format!(
+                            "[{}] Bad params for '{}': {}",
+                            account_id, db_strat.name, e
+                        ));
+                        continue;
+                    }
+                };
+
+                let symbols: Vec<String> =
+                    serde_json::from_str(&assignment.symbols_json).unwrap_or_default();
+
+                let settings = StrategySettings {
+                    name: db_strat.name.clone(),
+                    symbols,
+                    params,
+                };
+
+                new_strategies.push(create_strategy(&settings));
+            }
+
+            runner.strategies = new_strategies;
+        }
     }
 
-    /// Main loop
-    pub async fn run(&mut self, poll_interval_secs: u64) {
-        self.state.logger.info("Engine starting...");
+    pub async fn load_strategies(
+        &mut self,
+        account_id: &str,
+        broker: Arc<dyn Broker>,
+    ) -> Result<(), String> {
+        let assignments = self
+            .state
+            .storage
+            .get_strategies_for_account(account_id)
+            .await
+            .map_err(|e| format!("Failed to load strategies: {}", e))?;
 
-        let mut all_symbols: Vec<String> = Vec::new();
-        for strategy in &self.strategies {
-            for symbol in strategy.symbols() {
-                if !all_symbols.contains(symbol) {
-                    all_symbols.push(symbol.clone());
+        let mut strategies: Vec<Box<dyn Strategy>> = Vec::new();
+
+        for (db_strat, assignment) in assignments {
+            let params = db_strat
+                .params()
+                .map_err(|e| format!("Bad params for '{}': {}", db_strat.name, e))?;
+
+            let symbols: Vec<String> =
+                serde_json::from_str(&assignment.symbols_json).unwrap_or_default();
+
+            let settings = StrategySettings {
+                name: db_strat.name.clone(),
+                symbols,
+                params,
+            };
+
+            let strategy = create_strategy(&settings);
+            self.state.logger.info(&format!(
+                "[{}] Loaded strategy: {} for {:?}",
+                account_id,
+                strategy.name(),
+                strategy.symbols(),
+            ));
+            strategies.push(strategy);
+        }
+
+        self.state.logger.info(&format!(
+            "[{}] {} strategies loaded",
+            account_id,
+            strategies.len()
+        ));
+        self.accounts
+            .insert(account_id.to_string(), AccountRunner { broker, strategies });
+        Ok(())
+    }
+
+    fn all_symbols(&self) -> Vec<String> {
+        let mut symbols = Vec::new();
+        for runner in self.accounts.values() {
+            for strategy in &runner.strategies {
+                for symbol in strategy.symbols() {
+                    if !symbols.contains(symbol) {
+                        symbols.push(symbol.clone());
+                    }
                 }
             }
         }
+        symbols
+    }
 
-        self.state
-            .logger
-            .info(&format!("Tracking symbols: {:?}", all_symbols));
+    pub async fn run(&mut self, poll_interval_secs: u64) {
+        self.state.logger.info("Engine starting...");
 
-        // Prefetch historical data
+        let all_symbols = self.all_symbols();
+        self.state.logger.info(&format!(
+            "Tracking {} symbols across {} accounts: {:?}",
+            all_symbols.len(),
+            self.accounts.len(),
+            all_symbols
+        ));
+
         self.fetch_historical_data(&all_symbols).await;
 
         let mut ticker = interval(Duration::from_secs(poll_interval_secs));
@@ -101,9 +218,14 @@ impl Engine {
         loop {
             self.state.logger.info("=== Tick starting ===");
 
-            self.state.broker.update_prices(&all_symbols).await.ok();
+            self.reload_from_db().await;
 
-            // Fetch latest data for all symbols
+            let all_symbols = self.all_symbols();
+
+            for runner in self.accounts.values() {
+                runner.broker.update_prices(&all_symbols).await.ok();
+            }
+
             self.state.logger.info("Fetching latest bars...");
             let bars = match self.state.data.get_latest_bars(&all_symbols).await {
                 Ok(b) => {
@@ -122,49 +244,88 @@ impl Engine {
                 }
             };
 
-            // Collect signals first
-            let mut signals: Vec<(String, Signal, f64)> = Vec::new();
+            let mut all_signals: Vec<(String, String, Signal, f64)> = Vec::new();
 
-            for strategy in &mut self.strategies {
-                for symbol in strategy.symbols().to_vec() {
-                    if let Some(bar) = bars.get(&symbol)
-                        && let Some(signal) = strategy.on_bar(bar)
-                    {
-                        match &signal {
-                            Signal::Buy { .. } | Signal::Sell { .. } => {
-                                signals.push((strategy.name().to_string(), signal, bar.close));
+            for (account_id, runner) in &mut self.accounts {
+                for strategy in runner.strategies.iter_mut() {
+                    for symbol in strategy.symbols().to_vec() {
+                        if let Some(bar) = bars.get(&symbol)
+                            && let Some(signal) = strategy.on_bar(bar)
+                        {
+                            match &signal {
+                                Signal::Buy { .. } | Signal::Sell { .. } => {
+                                    all_signals.push((
+                                        account_id.clone(),
+                                        strategy.name().to_string(),
+                                        signal,
+                                        bar.close,
+                                    ));
+                                }
+                                Signal::Hold => {}
                             }
-                            Signal::Hold => {}
                         }
                     }
                 }
             }
 
-            self.state
-                .logger
-                .info(&format!("Generated {} signals", signals.len()));
+            self.state.logger.info(&format!(
+                "Generated {} signals across {} accounts",
+                all_signals.len(),
+                self.accounts.len(),
+            ));
 
-            // Now process signals
-            for (strategy_name, signal, price) in signals {
-                self.process_signal(&strategy_name, &signal, price).await;
+            for (account_id, strategy_name, signal, price) in all_signals {
+                self.process_signal(&account_id, &strategy_name, &signal, price)
+                    .await;
             }
 
-            // Save account snapshot
-            match self.state.broker.get_account().await {
-                Ok(account) => {
-                    let _ = self
-                        .state
-                        .storage
-                        .insert_account_snapshot(account.equity, account.cash, account.buying_power)
-                        .await;
-                    self.state
-                        .logger
-                        .info(&format!("Account: ${:.2}", account.equity));
+            for (account_id, runner) in &self.accounts {
+                match runner.broker.get_account().await {
+                    Ok(account) => {
+                        let _ = self
+                            .state
+                            .storage
+                            .insert_account_snapshot(
+                                account_id,
+                                account.equity,
+                                account.cash,
+                                account.buying_power,
+                            )
+                            .await;
+                        self.state
+                            .logger
+                            .info(&format!("[{}] Account: ${:.2}", account_id, account.equity));
+                    }
+                    Err(e) => {
+                        self.state
+                            .logger
+                            .error(&format!("[{}] Failed to fetch account: {}", account_id, e));
+                    }
                 }
-                Err(e) => {
-                    self.state
-                        .logger
-                        .error(&format!("Failed to fetch account: {}", e));
+            }
+
+            for (account_id, runner) in &self.accounts {
+                match runner.broker.get_positions().await {
+                    Ok(positions) => {
+                        for pos in &positions {
+                            let _ = self
+                                .state
+                                .storage
+                                .upsert_position(
+                                    account_id,
+                                    &pos.symbol,
+                                    pos.quantity,
+                                    pos.avg_entry_price,
+                                    pos.current_price,
+                                )
+                                .await;
+                        }
+                    }
+                    Err(e) => {
+                        self.state
+                            .logger
+                            .error(&format!("[{}] Failed to sync positions: {}", account_id, e));
+                    }
                 }
             }
 
@@ -176,25 +337,34 @@ impl Engine {
         }
     }
 
-    async fn process_signal(&mut self, strategy_name: &str, signal: &Signal, current_price: f64) {
-        // Log signal
+    async fn process_signal(
+        &mut self,
+        account_id: &str,
+        strategy_name: &str,
+        signal: &Signal,
+        current_price: f64,
+    ) {
+        let runner = match self.accounts.get(account_id) {
+            Some(r) => r,
+            None => return,
+        };
+
         match signal {
             Signal::Buy { symbol, strength } => {
                 self.state.logger.info(&format!(
-                    "[{}] BUY signal for {} (strength: {:.2})",
-                    strategy_name, symbol, strength
+                    "[{}][{}] BUY {} (strength: {:.2})",
+                    account_id, strategy_name, symbol, strength
                 ));
             }
             Signal::Sell { symbol, strength } => {
                 self.state.logger.info(&format!(
-                    "[{}] SELL signal for {} (strength: {:.2})",
-                    strategy_name, symbol, strength
+                    "[{}][{}] SELL {} (strength: {:.2})",
+                    account_id, strategy_name, symbol, strength
                 ));
             }
             Signal::Hold => return,
         }
 
-        // Save signal to DB
         let (symbol, signal_type, strength) = match signal {
             Signal::Buy { symbol, strength } => (symbol.clone(), "buy", *strength),
             Signal::Sell { symbol, strength } => (symbol.clone(), "sell", *strength),
@@ -204,48 +374,45 @@ impl Engine {
         let _ = self
             .state
             .storage
-            .insert_signal(&symbol, signal_type, strength, strategy_name)
+            .insert_signal(account_id, &symbol, signal_type, strength, strategy_name)
             .await;
 
-        // Get account and positions for risk check
-        let account = match self.state.broker.get_account().await {
+        let account = match runner.broker.get_account().await {
             Ok(a) => a,
             Err(e) => {
                 self.state
                     .logger
-                    .error(&format!("Failed to fetch account: {}", e));
+                    .error(&format!("[{}] Failed to fetch account: {}", account_id, e));
                 return;
             }
         };
 
-        let positions = match self.state.broker.get_positions().await {
+        let positions = match runner.broker.get_positions().await {
             Ok(p) => p,
             Err(e) => {
-                self.state
-                    .logger
-                    .error(&format!("Failed to fetch positions: {}", e));
+                self.state.logger.error(&format!(
+                    "[{}] Failed to fetch positions: {}",
+                    account_id, e
+                ));
                 return;
             }
         };
 
-        // Run through risk manager
         if let Some(order) =
             self.risk_manager
                 .evaluate_signal(signal, &account, &positions, current_price)
         {
             self.state.logger.info(&format!(
-                "Executing order: {:?} {} x {}",
-                order.side, order.symbol, order.quantity
+                "[{}] Executing: {:?} {} x {}",
+                account_id, order.side, order.symbol, order.quantity
             ));
 
-            // Execute order
-            match self.state.broker.submit_order(&order).await {
+            match runner.broker.submit_order(&order).await {
                 Ok(order_id) => {
                     self.state
                         .logger
-                        .info(&format!("Order filled: {}", order_id));
+                        .info(&format!("[{}] Order filled: {}", account_id, order_id));
 
-                    // Save trade
                     let side = match order.side {
                         Side::Buy => "buy",
                         Side::Sell => "sell",
@@ -255,6 +422,7 @@ impl Engine {
                         .state
                         .storage
                         .insert_trade(
+                            account_id,
                             &order.symbol,
                             side,
                             order.quantity,
@@ -265,7 +433,9 @@ impl Engine {
                         .await;
                 }
                 Err(e) => {
-                    self.state.logger.error(&format!("Order failed: {}", e));
+                    self.state
+                        .logger
+                        .error(&format!("[{}] Order failed: {}", account_id, e));
                 }
             }
         }
@@ -276,31 +446,25 @@ impl Engine {
             .logger
             .info("Fetching historical data for all symbols...");
 
-        // Group symbols by their timeframe/limit config
         let mut by_config: HashMap<(String, u32), Vec<String>> = HashMap::new();
 
-        for symbol in symbols {
-            let config = self
-                .strategy_configs
-                .iter()
-                .find(|c| c.symbols.contains(symbol));
+        for runner in self.accounts.values() {
+            for strategy in &runner.strategies {
+                let (timeframe, limit) = strategy
+                    .startup_config()
+                    .unwrap_or(("1Hour".to_string(), 50));
 
-            let (timeframe, limit) = match config.map(|c| &c.params) {
-                Some(StrategyParams::Momentum {
-                    startup_lookback,
-                    startup_bar_limit,
-                    ..
-                }) => (startup_lookback.clone(), *startup_bar_limit),
-                _ => ("1Hour".to_string(), 50),
-            };
-
-            by_config
-                .entry((timeframe, limit))
-                .or_default()
-                .push(symbol.clone());
+                for symbol in strategy.symbols() {
+                    if symbols.contains(symbol) {
+                        let entry = by_config.entry((timeframe.clone(), limit)).or_default();
+                        if !entry.contains(symbol) {
+                            entry.push(symbol.clone());
+                        }
+                    }
+                }
+            }
         }
 
-        // Batch fetch for each config group
         for ((timeframe, limit), group_symbols) in by_config {
             match self
                 .state
@@ -317,10 +481,12 @@ impl Engine {
                             timeframe
                         ));
 
-                        for bar in bars {
-                            for strategy in &mut self.strategies {
+                        for runner in self.accounts.values_mut() {
+                            for strategy in runner.strategies.iter_mut() {
                                 if strategy.symbols().contains(symbol) {
-                                    let _ = strategy.on_bar(bar);
+                                    for bar in bars {
+                                        let _ = strategy.on_bar(bar);
+                                    }
                                 }
                             }
                         }

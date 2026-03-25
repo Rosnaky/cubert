@@ -14,6 +14,7 @@ fn default_risk_config() -> RiskConfig {
 
 fn default_account() -> Account {
     Account {
+        id: "test_default".to_string(),
         equity: 100_000.0,
         cash: 100_000.0,
         buying_power: 100_000.0,
@@ -74,7 +75,7 @@ fn test_risk_manager_position_sizing() {
     let order = rm
         .evaluate_signal(&signal, &account, &positions, 100.0)
         .unwrap();
-    assert_eq!(order.quantity, 100.0); // 10% of 100k at $100
+    assert_eq!(order.quantity, 100.0);
 }
 
 #[test]

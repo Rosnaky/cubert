@@ -64,6 +64,7 @@ struct ApiMultiBarsHistoryResponse {
     bars: Option<HashMap<String, Vec<ApiBar>>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct MarketData {
     client: Client,
     data_endpoint: String,
