@@ -1,3 +1,4 @@
+pub mod mean_reversion;
 pub mod momentum;
 
 use crate::types::{Bar, Signal};
@@ -21,8 +22,16 @@ pub enum StrategyParams {
         startup_bar_limit: u32,
     },
     MeanReversion {
-        window: usize,
-        std_devs: f64,
+        window: i32,
+        zscore_entry: f64,
+        zscore_exit: f64,
+        min_half_life: f64,
+        max_half_life: f64,
+        adf_lags: i32,
+        recompute_interval: usize,
+        max_buffer: usize,
+        startup_lookback: String,
+        startup_bar_limit: u32,
     },
     Custom {
         params: std::collections::HashMap<String, f64>,
@@ -57,11 +66,32 @@ pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {
             *startup_bar_limit,
         )),
         StrategyParams::MeanReversion {
-            window: _,
-            std_devs: _,
-        } => {
-            todo!("Need to implement")
-        }
+            window,
+            zscore_entry,
+            zscore_exit,
+            min_half_life,
+            max_half_life,
+            adf_lags,
+            recompute_interval,
+            max_buffer,
+            startup_lookback,
+            startup_bar_limit,
+        } => Box::new(mean_reversion::MeanReversionStrategy::new(
+            mean_reversion::MeanReversionConfig {
+                name: config.name.clone(),
+                symbols: config.symbols.clone(),
+                window: *window,
+                zscore_entry: *zscore_entry,
+                zscore_exit: *zscore_exit,
+                min_half_life: *min_half_life,
+                max_half_life: *max_half_life,
+                adf_lags: *adf_lags,
+                recompute_interval: *recompute_interval,
+                max_buffer: *max_buffer,
+                startup_lookback: startup_lookback.clone(),
+                startup_bar_limit: *startup_bar_limit,
+            },
+        )),
         StrategyParams::Custom { .. } => {
             todo!("Need to implement")
         }
