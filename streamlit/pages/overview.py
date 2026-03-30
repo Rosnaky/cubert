@@ -36,7 +36,7 @@ st.markdown("---")
 st.subheader("Equity Curve")
 history = get_account_history(account_id, 500)
 if not history.empty:
-    history['timestamp'] = pd.to_datetime(history['timestamp'], format='ISO8601')
+    history['timestamp'] = pd.to_datetime(history['timestamp'], format='ISO8601', utc=True)
     history = history.sort_values('timestamp')
 
     fig = go.Figure()
