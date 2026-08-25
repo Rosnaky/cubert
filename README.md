@@ -87,9 +87,6 @@ orders to `api_endpoint` through `AlpacaApiBroker`.
 
 ## Running
 
-There is no CLI for creating accounts or strategies. Do that in Streamlit first, then
-start the engine.
-
 ```bash
 python -m venv venv
 source venv/bin/activate
