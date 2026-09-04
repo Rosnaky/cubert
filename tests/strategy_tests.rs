@@ -199,6 +199,30 @@ fn mean_reversion_config(
     }
 }
 
+/// The GEM kernels run on the GPU, and a launch on a machine with no CUDA
+/// device fails silently: the output buffers keep the zeros they were
+/// allocated with. Tests that assert on computed values must skip there, or
+/// they either fail (when they expect a signal) or pass for the wrong reason
+/// (when they expect silence).
+fn gpu_available() -> bool {
+    let prices: Vec<f64> = (0..16)
+        .map(|i| if i % 2 == 0 { 100.0 } else { 101.0 })
+        .collect();
+
+    cubert::model::ffi::zscore(&prices, 4)
+        .iter()
+        .any(|z| z.is_finite() && *z != 0.0)
+}
+
+macro_rules! require_gpu {
+    ($name:expr) => {
+        if !gpu_available() {
+            eprintln!("skipping {}: no working CUDA device", $name);
+            return;
+        }
+    };
+}
+
 /// Deterministic pseudo-random noise, so the tests do not need a rng crate.
 fn noise(seed: &mut u64) -> f64 {
     *seed = seed
@@ -222,6 +246,8 @@ fn ou_series(n: usize, mean: f64, theta: f64, sigma: f64) -> Vec<f64> {
 
 #[test]
 fn test_mean_reversion_generates_signals_on_stationary_series() {
+    require_gpu!("mean reversion signal generation");
+
     let mut strategy =
         MeanReversionStrategy::new(mean_reversion_config(vec!["OU".to_string()], 60));
 
@@ -249,6 +275,8 @@ fn test_mean_reversion_generates_signals_on_stationary_series() {
 
 #[test]
 fn test_mean_reversion_silent_on_trending_series() {
+    require_gpu!("mean reversion trending series");
+
     let mut strategy =
         MeanReversionStrategy::new(mean_reversion_config(vec!["TREND".to_string()], 60));
 
@@ -311,7 +339,9 @@ fn test_mean_reversion_params_require_baseline_vol() {
 }
 
 #[test]
-fn test_mean_reversion_diagnostics_explain_silence() {
+fn test_mean_reversion_diagnostics_name_the_failing_gate() {
+    require_gpu!("mean reversion diagnostics");
+
     let mut strategy =
         MeanReversionStrategy::new(mean_reversion_config(vec!["TREND".to_string()], 60));
 
@@ -326,10 +356,14 @@ fn test_mean_reversion_diagnostics_explain_silence() {
         "diagnostics should name the failing gate: {}",
         lines[0]
     );
+}
 
+#[test]
+fn test_mean_reversion_diagnostics_report_warmup() {
     let mut warming =
         MeanReversionStrategy::new(mean_reversion_config(vec!["TREND".to_string()], 60));
     warming.on_bar(&make_bar("TREND", 100.0));
+
     assert!(
         warming.diagnostics()[0].contains("warming up, 1/61 bars"),
         "warmup progress should be visible: {}",
