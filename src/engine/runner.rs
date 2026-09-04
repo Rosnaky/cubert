@@ -9,7 +9,7 @@ use crate::{
     logging::Logger,
     risk::RiskManager,
     storage::Storage,
-    strategy::{Strategy, StrategySettings, create_strategy},
+    strategy::{Strategy, StrategyParams, StrategySettings, create_strategy},
     types::{Side, Signal},
 };
 
@@ -62,7 +62,23 @@ impl Engine {
         }
     }
 
+    fn canonical_params(params_json: &str) -> String {
+        serde_json::from_str::<StrategyParams>(params_json)
+            .ok()
+            .and_then(|p| serde_json::to_string(&p).ok())
+            .unwrap_or_else(|| params_json.to_string())
+    }
+
+    fn canonical_symbols(symbols_json: &str) -> String {
+        serde_json::from_str::<Vec<String>>(symbols_json)
+            .ok()
+            .and_then(|s| serde_json::to_string(&s).ok())
+            .unwrap_or_else(|| symbols_json.to_string())
+    }
+
     async fn reload_from_db(&mut self) {
+        let mut reloaded = false;
+
         for (account_id, runner) in &mut self.accounts {
             let assignments = match self
                 .state
@@ -84,8 +100,8 @@ impl Engine {
                 .map(|(s, a)| {
                     (
                         s.name.clone(),
-                        a.symbols_json.clone(),
-                        s.params_json.clone(),
+                        Self::canonical_symbols(&a.symbols_json),
+                        Self::canonical_params(&s.params_json),
                     )
                 })
                 .collect();
@@ -135,6 +151,12 @@ impl Engine {
             }
 
             runner.strategies = new_strategies;
+            reloaded = true;
+        }
+
+        if reloaded {
+            let all_symbols = self.all_symbols();
+            self.fetch_historical_data(&all_symbols).await;
         }
     }
 
@@ -264,6 +286,15 @@ impl Engine {
                                 Signal::Hold => {}
                             }
                         }
+                    }
+
+                    for line in strategy.diagnostics() {
+                        self.state.logger.debug(&format!(
+                            "[{}][{}] {}",
+                            account_id,
+                            strategy.name(),
+                            line
+                        ));
                     }
                 }
             }
@@ -473,6 +504,15 @@ impl Engine {
                 .await
             {
                 Ok(bars_map) => {
+                    for symbol in &group_symbols {
+                        if bars_map.get(symbol).is_none_or(|b| b.is_empty()) {
+                            self.state.logger.warn(&format!(
+                                "{}: no historical bars returned ({}), starting cold",
+                                symbol, timeframe
+                            ));
+                        }
+                    }
+
                     for (symbol, bars) in &bars_map {
                         self.state.logger.info(&format!(
                             "{}: loaded {} bars ({})",
