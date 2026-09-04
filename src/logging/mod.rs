@@ -1,7 +1,8 @@
 use std::{
+    collections::HashMap,
     fs::{File, OpenOptions},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Mutex,
 };
 
@@ -31,10 +32,16 @@ impl std::fmt::Display for Level {
 pub struct Logger {
     level: Level,
     file: Option<Mutex<File>>,
+    strategy_dir: Option<PathBuf>,
+    strategy_files: Mutex<HashMap<String, File>>,
 }
 
 impl Logger {
-    pub fn new(level: Level, file_path: Option<&str>) -> std::io::Result<Self> {
+    pub fn new(
+        level: Level,
+        file_path: Option<&str>,
+        strategy_dir: Option<&str>,
+    ) -> std::io::Result<Self> {
         let file = if let Some(path) = file_path {
             if let Some(parent) = Path::new(path).parent() {
                 std::fs::create_dir_all(parent)?;
@@ -46,7 +53,98 @@ impl Logger {
             None
         };
 
-        Ok(Logger { level, file })
+        let strategy_dir = strategy_dir.map(PathBuf::from).or_else(|| {
+            file_path.and_then(|p| Path::new(p).parent().map(|d| d.join("strategies")))
+        });
+
+        if let Some(ref dir) = strategy_dir {
+            std::fs::create_dir_all(dir)?;
+        }
+
+        Ok(Logger {
+            level,
+            file,
+            strategy_dir,
+            strategy_files: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn sanitize(value: &str) -> String {
+        value
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    }
+
+    fn file_stem(id: &str, name: &str) -> String {
+        let name = Self::sanitize(name);
+        let id = Self::sanitize(id);
+
+        match (name.is_empty(), id.is_empty()) {
+            (true, true) => "unnamed".to_string(),
+            (true, false) => id,
+            (false, true) => name,
+            (false, false) => format!("{}_{}", name, id),
+        }
+    }
+
+    fn write_strategy_line(&self, id: &str, name: &str, line: &str) {
+        let dir = match self.strategy_dir {
+            Some(ref d) => d,
+            None => return,
+        };
+
+        let mut files = match self.strategy_files.lock() {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+
+        if !files.contains_key(id) {
+            let path = dir.join(format!("{}.log", Self::file_stem(id, name)));
+            match OpenOptions::new().create(true).append(true).open(&path) {
+                Ok(f) => {
+                    files.insert(id.to_string(), f);
+                }
+                Err(_) => return,
+            }
+        }
+
+        if let Some(f) = files.get_mut(id) {
+            let _ = writeln!(f, "{}", line);
+        }
+    }
+
+    fn log_strategy(&self, id: &str, name: &str, level: Level, message: &str) {
+        if level < self.level {
+            return;
+        }
+
+        self.log(level, message);
+
+        let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        self.write_strategy_line(
+            id,
+            name,
+            &format!("[{}] [{}] {}", timestamp, level, message),
+        );
+    }
+
+    pub fn strategy_debug(&self, id: &str, name: &str, message: &str) {
+        self.log_strategy(id, name, Level::Debug, message);
+    }
+
+    pub fn strategy_info(&self, id: &str, name: &str, message: &str) {
+        self.log_strategy(id, name, Level::Info, message);
+    }
+
+    pub fn strategy_error(&self, id: &str, name: &str, message: &str) {
+        self.log_strategy(id, name, Level::Error, message);
     }
 
     pub fn parse_level(s: &str) -> Level {
