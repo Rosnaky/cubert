@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
 use crate::{
-    model::ffi::{self},
+    model::ffi,
     strategy::{Strategy, StrategyParams},
     types::{Bar, Signal},
 };
+
+const VOL_SCALAR_MIN: f64 = 0.25;
+const VOL_SCALAR_MAX: f64 = 1.5;
 
 pub struct MeanReversionStrategy {
     name: String,
@@ -14,6 +17,7 @@ pub struct MeanReversionStrategy {
     zscore_exit: f64,
     min_half_life: f64,
     max_half_life: f64,
+    baseline_vol: f64,
     adf_lags: i32,
     recompute_interval: usize,
     max_buffer: usize,
@@ -26,11 +30,11 @@ pub struct MeanReversionStrategy {
 
 struct SymbolState {
     zscore: f64,
+    prev_zscore: f64,
     half_life: f64,
     equilibrium: f64,
     volatility: f64,
-    theta: f64,
-    is_stationary: bool,
+    adf_tau: f64,
     adf_confidence: AdfConfidence,
 }
 
@@ -51,6 +55,10 @@ impl AdfConfidence {
             AdfConfidence::OnePercent => 1.0,
         }
     }
+
+    fn is_stationary(self) -> bool {
+        !matches!(self, AdfConfidence::None)
+    }
 }
 
 pub struct MeanReversionConfig {
@@ -61,6 +69,7 @@ pub struct MeanReversionConfig {
     pub zscore_exit: f64,
     pub min_half_life: f64,
     pub max_half_life: f64,
+    pub baseline_vol: f64,
     pub adf_lags: i32,
     pub recompute_interval: usize,
     pub max_buffer: usize,
@@ -78,6 +87,7 @@ impl MeanReversionStrategy {
             zscore_exit: config.zscore_exit,
             min_half_life: config.min_half_life,
             max_half_life: config.max_half_life,
+            baseline_vol: config.baseline_vol,
             adf_lags: config.adf_lags,
             recompute_interval: config.recompute_interval,
             max_buffer: config.max_buffer,
@@ -89,10 +99,83 @@ impl MeanReversionStrategy {
         }
     }
 
+    fn min_bars(&self) -> usize {
+        self.window.max(1) as usize + 1
+    }
+
+    fn exit_threshold(&self) -> f64 {
+        self.zscore_exit.min(self.zscore_entry)
+    }
+
+    fn regime_block(&self, state: &SymbolState) -> Option<String> {
+        if !state.adf_confidence.is_stationary() {
+            return Some(format!("adf tau {:.2} not below -2.57", state.adf_tau));
+        }
+        if !state.half_life.is_finite() {
+            return Some("half-life undefined, series is not mean reverting".to_string());
+        }
+        if state.half_life < self.min_half_life {
+            return Some(format!(
+                "half-life {:.1} below min {:.1}",
+                state.half_life, self.min_half_life
+            ));
+        }
+        if state.half_life > self.max_half_life {
+            return Some(format!(
+                "half-life {:.1} above max {:.1}",
+                state.half_life, self.max_half_life
+            ));
+        }
+        None
+    }
+
+    fn regime_ok(&self, state: &SymbolState) -> bool {
+        self.regime_block(state).is_none()
+    }
+
+    fn entry_check(&self, state: &SymbolState, price: f64) -> Result<f64, String> {
+        if let Some(reason) = self.regime_block(state) {
+            return Err(reason);
+        }
+        if state.zscore.is_nan() {
+            return Err("z-score undefined".to_string());
+        }
+        if state.zscore >= -self.zscore_entry {
+            return Err(format!(
+                "z {:.2} not below entry {:.2}",
+                state.zscore, -self.zscore_entry
+            ));
+        }
+        if state.equilibrium.is_nan() || price >= state.equilibrium {
+            return Err(format!(
+                "price {:.2} not below equilibrium {:.2}",
+                price, state.equilibrium
+            ));
+        }
+        if !state.volatility.is_finite() || state.volatility <= 0.0 || price <= 0.0 {
+            return Err(format!("volatility {:.4} unusable", state.volatility));
+        }
+
+        let fractional_vol = state.volatility / price;
+        let vol_scalar = if self.baseline_vol > 0.0 {
+            (self.baseline_vol / fractional_vol).clamp(VOL_SCALAR_MIN, VOL_SCALAR_MAX)
+        } else {
+            1.0
+        };
+        let raw_strength = (state.zscore.abs() / self.zscore_entry).min(1.5);
+        let strength = (raw_strength * state.adf_confidence.weight() * vol_scalar).min(1.0);
+
+        if strength <= 0.0 {
+            return Err("strength collapsed to zero".to_string());
+        }
+
+        Ok(strength)
+    }
+
     fn recompute(&mut self, symbol: &str) {
         let prices = match self.price_buffers.get(symbol) {
-            Some(p) => p,
-            None => return,
+            Some(p) if p.len() >= self.min_bars() => p,
+            _ => return,
         };
 
         let zscores = ffi::zscore(prices, self.window);
@@ -100,9 +183,11 @@ impl MeanReversionStrategy {
         let adf_result = ffi::adf(prices, self.adf_lags);
 
         let last = prices.len() - 1;
-        let speed = speeds[last];
+        let ou_last = last - 1;
 
-        let half_life = if speed > 0.0 && !speed.is_nan() {
+        let speed = speeds[ou_last];
+
+        let half_life = if speed > 0.0 {
             (2.0_f64).ln() / speed
         } else {
             f64::NAN
@@ -118,15 +203,21 @@ impl MeanReversionStrategy {
             AdfConfidence::None
         };
 
+        let prev_zscore = self
+            .signals
+            .get(symbol)
+            .map(|s| s.zscore)
+            .unwrap_or(f64::NAN);
+
         self.signals.insert(
             symbol.to_string(),
             SymbolState {
                 zscore: zscores[last],
+                prev_zscore,
                 half_life,
-                equilibrium: equilibria[last],
-                volatility: volatility_sq[last].sqrt(),
-                theta: speed,
-                is_stationary: adf_result.reject_10pct,
+                equilibrium: equilibria[ou_last],
+                volatility: volatility_sq[ou_last].sqrt(),
+                adf_tau: adf_result.tau,
                 adf_confidence,
             },
         );
@@ -134,44 +225,23 @@ impl MeanReversionStrategy {
 
     fn generate_signal(&self, symbol: &str, price: f64) -> Option<Signal> {
         let state = self.signals.get(symbol)?;
+        let exit_threshold = self.exit_threshold();
 
-        if !state.is_stationary {
-            return None;
-        }
-
-        if state.half_life.is_nan()
-            || state.half_life < self.min_half_life
-            || state.half_life > self.max_half_life
-        {
-            return None;
-        }
-
-        let z = state.zscore;
-        if z.is_nan() {
-            return None;
-        }
-
-        let baseline_vol = 0.02;
-        let vol_scalar = (baseline_vol / state.volatility).clamp(0.25, 1.5);
-        let raw_strength = (z.abs() / self.zscore_entry).min(1.5);
-        let strength = (raw_strength * state.adf_confidence.weight() * vol_scalar).min(1.0);
-
-        let expected_move = state.theta * (state.equilibrium - price);
-        let edge = expected_move / state.volatility;
-
-        if z < -self.zscore_entry {
-            Some(Signal::Buy {
+        let was_stretched = state.prev_zscore < -exit_threshold;
+        let reverted = state.zscore.is_nan() || state.zscore >= -exit_threshold;
+        if was_stretched && (reverted || !self.regime_ok(state)) {
+            return Some(Signal::Sell {
                 symbol: symbol.to_string(),
-                strength,
-            })
-        } else if edge < self.zscore_exit {
-            Some(Signal::Sell {
-                symbol: symbol.to_string(),
-                strength,
-            })
-        } else {
-            None
+                strength: 1.0,
+            });
         }
+
+        let strength = self.entry_check(state, price).ok()?;
+
+        Some(Signal::Buy {
+            symbol: symbol.to_string(),
+            strength,
+        })
     }
 }
 
@@ -190,18 +260,21 @@ impl Strategy for MeanReversionStrategy {
         if buffer.len() > self.max_buffer {
             buffer.remove(0);
         }
+        let buffered = buffer.len();
 
         let count = self.bar_counts.entry(bar.symbol.clone()).or_insert(0);
         *count += 1;
+        let count = *count;
 
-        if (buffer.len() as i32) < self.window {
+        if buffered < self.min_bars() {
             return None;
         }
 
-        if (*count).is_multiple_of(self.recompute_interval) {
-            self.recompute(&bar.symbol);
+        if !count.is_multiple_of(self.recompute_interval.max(1)) {
+            return None;
         }
 
+        self.recompute(&bar.symbol);
         self.generate_signal(&bar.symbol, bar.close)
     }
 
@@ -215,6 +288,54 @@ impl Strategy for MeanReversionStrategy {
         Some((self.startup_lookback.clone(), self.startup_bar_limit))
     }
 
+    fn diagnostics(&self) -> Vec<String> {
+        let mut out = Vec::new();
+
+        for symbol in &self.symbols {
+            let buffer = self.price_buffers.get(symbol);
+            let buffered = buffer.map(|b| b.len()).unwrap_or(0);
+
+            if buffered < self.min_bars() {
+                out.push(format!(
+                    "{}: warming up, {}/{} bars",
+                    symbol,
+                    buffered,
+                    self.min_bars()
+                ));
+                continue;
+            }
+
+            let state = match self.signals.get(symbol) {
+                Some(s) => s,
+                None => {
+                    out.push(format!("{}: {} bars, no estimate yet", symbol, buffered));
+                    continue;
+                }
+            };
+
+            let price = buffer.and_then(|b| b.last().copied()).unwrap_or(f64::NAN);
+            let verdict = match self.entry_check(state, price) {
+                Ok(strength) => format!("BUY eligible, strength {:.2}", strength),
+                Err(reason) => format!("no entry: {}", reason),
+            };
+
+            out.push(format!(
+                "{}: {} bars, z={:.2} half_life={:.1} adf_tau={:.2} vol={:.4} eq={:.2} px={:.2} -> {}",
+                symbol,
+                buffered,
+                state.zscore,
+                state.half_life,
+                state.adf_tau,
+                state.volatility,
+                state.equilibrium,
+                price,
+                verdict
+            ));
+        }
+
+        out
+    }
+
     fn params(&self) -> super::StrategyParams {
         StrategyParams::MeanReversion {
             window: self.window,
@@ -222,6 +343,7 @@ impl Strategy for MeanReversionStrategy {
             zscore_exit: self.zscore_exit,
             min_half_life: self.min_half_life,
             max_half_life: self.max_half_life,
+            baseline_vol: self.baseline_vol,
             adf_lags: self.adf_lags,
             recompute_interval: self.recompute_interval,
             max_buffer: self.max_buffer,

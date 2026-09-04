@@ -27,6 +27,7 @@ pub enum StrategyParams {
         zscore_exit: f64,
         min_half_life: f64,
         max_half_life: f64,
+        baseline_vol: f64,
         adf_lags: i32,
         recompute_interval: usize,
         max_buffer: usize,
@@ -46,6 +47,9 @@ pub trait Strategy: Send + Sync {
     fn reset(&mut self);
     fn startup_config(&self) -> Option<(String, u32)> {
         None
+    }
+    fn diagnostics(&self) -> Vec<String> {
+        Vec::new()
     }
     fn params(&self) -> StrategyParams;
 }
@@ -71,6 +75,7 @@ pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {
             zscore_exit,
             min_half_life,
             max_half_life,
+            baseline_vol,
             adf_lags,
             recompute_interval,
             max_buffer,
@@ -85,6 +90,7 @@ pub fn create_strategy(config: &StrategySettings) -> Box<dyn Strategy> {
                 zscore_exit: *zscore_exit,
                 min_half_life: *min_half_life,
                 max_half_life: *max_half_life,
+                baseline_vol: *baseline_vol,
                 adf_lags: *adf_lags,
                 recompute_interval: *recompute_interval,
                 max_buffer: *max_buffer,

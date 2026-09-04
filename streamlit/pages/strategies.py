@@ -35,12 +35,14 @@ if not strategies_df.empty:
                 edited_params = {}
                 col1, col2 = st.columns(2)
 
-                param_keys = [k for k in params if k != "type"]
+                stored = {k: v for k, v in params.items() if k != "type"}
+                merged = {**definition.default_params(), **stored}
+                param_keys = list(merged)
                 half = (len(param_keys) + 1) // 2
 
                 for i, key in enumerate(param_keys):
                     col = col1 if i < half else col2
-                    value = params[key]
+                    value = merged[key]
                     label = key.replace('_', ' ').title()
 
                     with col:
@@ -73,7 +75,7 @@ if not strategies_df.empty:
 
                 # Check for changes
                 name_changed = new_name != row['name']
-                params_changed = edited_params != {k: v for k, v in params.items() if k != "type"}
+                params_changed = edited_params != stored
 
                 col1, col2 = st.columns([1, 1])
                 with col1:

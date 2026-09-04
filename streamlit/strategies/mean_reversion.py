@@ -15,6 +15,7 @@ class MeanReversionDefinition(StrategyDefinition):
             "zscore_exit": 0.5,
             "min_half_life": 2.0,
             "max_half_life": 50.0,
+            "baseline_vol": 0.02,
             "adf_lags": 1,
             "recompute_interval": 5,
             "max_buffer": 500,
@@ -29,6 +30,7 @@ class MeanReversionDefinition(StrategyDefinition):
             "zscore_exit": "Z-score threshold to exit. When price reverts past equilibrium, close the position.",
             "min_half_life": "Minimum mean-reversion half-life in bars. Below this, signal is noise.",
             "max_half_life": "Maximum mean-reversion half-life in bars. Above this, capital is tied up too long.",
+            "baseline_vol": "Typical volatility (as a fraction of price) a symbol is sized against. Quieter symbols size up, noisier ones size down. Affects position size only, never whether a signal fires.",
             "adf_lags": "Number of lags for the Augmented Dickey-Fuller stationarity test.",
             "recompute_interval": "Recompute GPU signals every N bars. Lower = more responsive, higher = less GPU usage.",
             "max_buffer": "Maximum price history to keep per symbol. Also controls startup bar fetch.",
@@ -68,6 +70,11 @@ class MeanReversionDefinition(StrategyDefinition):
             recompute_interval = st.number_input("Recompute Interval", min_value=1, value=5)
             st.caption(descs["recompute_interval"])
 
+            baseline_vol = st.number_input(
+                "Baseline Volatility", min_value=0.001, value=0.02, step=0.005, format="%.3f"
+            )
+            st.caption(descs["baseline_vol"])
+
             max_buffer = st.number_input("Max Buffer", min_value=50, value=500, step=50)
             st.caption(descs["max_buffer"])
 
@@ -80,6 +87,7 @@ class MeanReversionDefinition(StrategyDefinition):
             "zscore_exit": zscore_exit,
             "min_half_life": min_half_life,
             "max_half_life": max_half_life,
+            "baseline_vol": baseline_vol,
             "adf_lags": adf_lags,
             "recompute_interval": recompute_interval,
             "max_buffer": max_buffer,

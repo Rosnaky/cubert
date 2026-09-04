@@ -20,8 +20,14 @@ async fn main() {
     };
 
     let level = Logger::parse_level(&config.logging.level);
-    let logger =
-        Arc::new(Logger::new(level, Some(&config.logging.file)).expect("Failed to create logger"));
+    let logger = Arc::new(
+        Logger::new(
+            level,
+            Some(&config.logging.file),
+            config.logging.strategy_dir.as_deref(),
+        )
+        .expect("Failed to create logger"),
+    );
 
     logger.info("=== Cubert Starting ===");
 

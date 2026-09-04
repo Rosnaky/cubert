@@ -62,6 +62,8 @@ pub struct RiskConfig {
 pub struct LoggingConfig {
     pub level: String,
     pub file: String,
+    #[serde(default)]
+    pub strategy_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
